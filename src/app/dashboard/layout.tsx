@@ -12,15 +12,17 @@ import {
   Settings,
   Bell,
   ChevronDown,
+  Kanban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 
 const navItems = [
-  { href: '/dashboard',            label: 'Tableau de bord', icon: LayoutDashboard },
-  { href: '/dashboard/leads',      label: 'Prospects',       icon: Users },
-  { href: '/dashboard/vehicules',  label: 'Véhicules',       icon: Car },
-  { href: '/dashboard/activites',  label: 'Activités',       icon: Activity },
+  { href: '/dashboard',             label: 'Tableau de bord', icon: LayoutDashboard },
+  { href: '/dashboard/prospects',   label: 'Pipeline',        icon: Kanban },
+  { href: '/dashboard/leads',       label: 'Prospects',       icon: Users },
+  { href: '/dashboard/vehicules',   label: 'Véhicules',       icon: Car },
+  { href: '/dashboard/activites',   label: 'Activités',       icon: Activity },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

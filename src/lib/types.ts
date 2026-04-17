@@ -31,6 +31,17 @@ export type Vehicle = {
   created_at: string
 }
 
+export type LeadSource =
+  | 'walk-in'
+  | 'phone'
+  | 'website'
+  | 'referral'
+  | 'social'
+  | 'facebook'
+  | 'instagram'
+  | 'whatsapp'
+  | 'telephone'
+
 export type Lead = {
   id: string
   showroom_id: string | null
@@ -40,9 +51,12 @@ export type Lead = {
   phone: string | null
   email: string | null
   wilaya: string | null
-  source: 'walk-in' | 'phone' | 'website' | 'referral' | 'social'
+  source: LeadSource
   status: 'new' | 'contacted' | 'qualified' | 'proposal' | 'won' | 'lost'
   notes: string | null
+  // fields added by migration_01_kanban.sql
+  model_wanted: string | null
+  budget_dzd: number | null
   created_at: string
   updated_at: string
 }
@@ -57,38 +71,59 @@ export type Activity = {
   scheduled_at: string | null
   done: boolean
   created_at: string
-  // joined
+  // joined relations
   leads?: { full_name: string } | null
   users?: { full_name: string } | null
 }
 
+// ── Display labels ───────────────────────────────────────────────
+
 export const LEAD_STATUS_LABELS: Record<Lead['status'], string> = {
   new: 'Nouveau',
   contacted: 'Contacté',
-  qualified: 'Qualifié',
-  proposal: 'Offre',
-  won: 'Gagné',
+  qualified: 'RDV planifié',
+  proposal: 'Offre faite',
+  won: 'Vendu',
   lost: 'Perdu',
 }
 
-export const LEAD_SOURCE_LABELS: Record<Lead['source'], string> = {
-  'walk-in': 'Showroom',
-  phone: 'Téléphone',
-  website: 'Site web',
-  referral: 'Recommandation',
-  social: 'Réseaux sociaux',
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+  'walk-in':   'Showroom',
+  phone:       'Téléphone',
+  website:     'Site web',
+  referral:    'Recommandation',
+  social:      'Réseaux sociaux',
+  facebook:    'Facebook',
+  instagram:   'Instagram',
+  whatsapp:    'WhatsApp',
+  telephone:   'Téléphone',
 }
 
 export const VEHICLE_STATUS_LABELS: Record<Vehicle['status'], string> = {
   available: 'Disponible',
-  reserved: 'Réservé',
-  sold: 'Vendu',
+  reserved:  'Réservé',
+  sold:      'Vendu',
 }
 
 export const ACTIVITY_TYPE_LABELS: Record<Activity['type'], string> = {
-  call: 'Appel',
-  email: 'Email',
-  meeting: 'Réunion',
-  note: 'Note',
+  call:          'Appel',
+  email:         'Email',
+  meeting:       'Réunion',
+  note:          'Note',
   status_change: 'Changement statut',
 }
+
+// ── 58 Wilayas d'Algérie ─────────────────────────────────────────
+export const WILAYAS_58: string[] = [
+  'Adrar', 'Chlef', 'Laghouat', 'Oum El Bouaghi', 'Batna', 'Béjaïa',
+  'Biskra', 'Béchar', 'Blida', 'Bouira', 'Tamanrasset', 'Tébessa',
+  'Tlemcen', 'Tiaret', 'Tizi Ouzou', 'Alger', 'Djelfa', 'Jijel',
+  'Sétif', 'Saïda', 'Skikda', 'Sidi Bel Abbès', 'Annaba', 'Guelma',
+  'Constantine', 'Médéa', 'Mostaganem', "M'Sila", 'Mascara', 'Ouargla',
+  'Oran', 'El Bayadh', 'Illizi', 'Bordj Bou Arréridj', 'Boumerdès',
+  'El Tarf', 'Tindouf', 'Tissemsilt', 'El Oued', 'Khenchela',
+  'Souk Ahras', 'Tipaza', 'Mila', 'Aïn Defla', 'Naâma',
+  'Aïn Témouchent', 'Ghardaïa', 'Relizane', 'Timimoun',
+  'Bordj Badji Mokhtar', 'Ouled Djellal', 'Béni Abbès', 'In Salah',
+  'In Guezzam', 'Touggourt', 'Djanet', "El M'ghair", 'El Menia',
+]
