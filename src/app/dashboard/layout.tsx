@@ -10,12 +10,13 @@ import {
   Activity,
   LogOut,
   Settings,
-  Bell,
   ChevronDown,
   Kanban,
+  BellRing,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
+import { NotificationBell } from '@/components/alerts/notification-bell'
 
 const navItems = [
   { href: '/dashboard',             label: 'Tableau de bord', icon: LayoutDashboard },
@@ -23,6 +24,7 @@ const navItems = [
   { href: '/dashboard/leads',       label: 'Prospects',       icon: Users },
   { href: '/dashboard/vehicules',   label: 'Véhicules',       icon: Car },
   { href: '/dashboard/activites',   label: 'Activités',       icon: Activity },
+  { href: '/dashboard/alerts',      label: 'Alertes',         icon: BellRing },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -30,6 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router   = useRouter()
   const [userName, setUserName] = useState('Utilisateur')
   const [userInitial, setUserInitial] = useState('U')
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -42,6 +45,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const display = name.charAt(0).toUpperCase() + name.slice(1)
       setUserName(display)
       setUserInitial(display.charAt(0).toUpperCase())
+      setUserId(data.user.id)
     })
   }, [router])
 
@@ -139,9 +143,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <span className="text-gray-800 font-semibold text-sm">{activeLabel()}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
-              <Bell className="w-4 h-4" />
-            </button>
+            <NotificationBell userId={userId} />
             <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center">
               <span className="text-white text-xs font-bold">{userInitial}</span>
             </div>

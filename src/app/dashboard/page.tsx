@@ -9,6 +9,7 @@ import {
 import { Users, Car, TrendingUp, Trophy, ArrowUpRight, Clock } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge } from '@/components/ui/badge'
+import { AlertBanner } from '@/components/alerts/alert-banner'
 import {
   LEAD_STATUS_LABELS, LEAD_SOURCE_LABELS,
   type Lead, type Vehicle,
@@ -30,6 +31,8 @@ function sourceVariant(source: Lead['source']) {
   const map: Record<Lead['source'], 'default' | 'info' | 'purple' | 'indigo' | 'warning'> = {
     'walk-in': 'default', phone: 'info', website: 'purple',
     referral: 'indigo', social: 'warning',
+    facebook: 'info', instagram: 'purple',
+    whatsapp: 'info', telephone: 'info',
   }
   return map[source] ?? 'default'
 }
@@ -137,6 +140,9 @@ export default function DashboardPage() {
           {format(now, "EEEE d MMMM yyyy", { locale: fr })} · Vue d&apos;ensemble commerciale
         </p>
       </div>
+
+      {/* ── Red alert banner (leads ignored > 48h) ── */}
+      <AlertBanner />
 
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

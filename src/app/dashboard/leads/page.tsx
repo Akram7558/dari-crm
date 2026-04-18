@@ -40,6 +40,8 @@ function sourceVariant(source: Lead['source']): BadgeVariant {
   const map: Record<Lead['source'], BadgeVariant> = {
     'walk-in': 'default', phone: 'info', website: 'purple',
     referral: 'indigo', social: 'warning',
+    facebook: 'info', instagram: 'purple',
+    whatsapp: 'success', telephone: 'info',
   }
   return map[source]
 }

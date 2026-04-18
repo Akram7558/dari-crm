@@ -113,6 +113,35 @@ export const ACTIVITY_TYPE_LABELS: Record<Activity['type'], string> = {
   status_change: 'Changement statut',
 }
 
+// ── Notifications / alerts ───────────────────────────────────────
+
+export type NotificationType =
+  | 'lead_ignored'
+  | 'lead_stagnant'
+  | 'stock_rupture'
+  | 'vendor_inactive'
+
+export type Notification = {
+  id: string
+  showroom_id: string | null
+  user_id: string | null
+  type: NotificationType
+  title: string
+  message: string
+  lead_id: string | null
+  vehicle_id: string | null
+  dedupe_key: string | null
+  read: boolean
+  created_at: string
+}
+
+export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  lead_ignored:    'Lead ignoré',
+  lead_stagnant:   'Lead stagnant',
+  stock_rupture:   'Rupture de stock',
+  vendor_inactive: 'Vendeur inactif',
+}
+
 // ── 58 Wilayas d'Algérie ─────────────────────────────────────────
 export const WILAYAS_58: string[] = [
   'Adrar', 'Chlef', 'Laghouat', 'Oum El Bouaghi', 'Batna', 'Béjaïa',
