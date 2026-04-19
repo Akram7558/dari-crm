@@ -10,6 +10,9 @@ import { supabase } from '@/lib/supabase'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import type { Integration, IntegrationProvider } from '@/lib/types'
+import { fbLogin, loadFacebookSDK } from '@/lib/facebook-sdk'
+
+const WHATSAPP_SCOPE = 'whatsapp_business_management,whatsapp_business_messaging,business_management'
 
 // ── Provider metadata ─────────────────────────────────────────
 
@@ -298,6 +301,60 @@ export default function IntegrationsPage() {
     }
   }
 
+  // Real Meta Embedded Signup for WhatsApp. Loads FB SDK on demand,
+  // runs FB.login, then hands the short-lived token to the connect
+  // endpoint which exchanges it for a long-lived token and discovers
+  // the WABA + phone number.
+  async function handleWhatsAppEmbeddedSignup(card: ProviderCard) {
+    if (!showroomId) {
+      pushToast('error', 'Aucun showroom associé à ce compte.')
+      return
+    }
+    const appId = process.env.NEXT_PUBLIC_META_APP_ID
+    if (!appId) {
+      pushToast('error', 'NEXT_PUBLIC_META_APP_ID manquant — impossible de lancer le SDK Meta.')
+      return
+    }
+
+    setBusy(card.id)
+    try {
+      const fb = await loadFacebookSDK(appId)
+      const response = await fbLogin(fb, WHATSAPP_SCOPE)
+
+      if (response.status !== 'connected' || !response.authResponse?.accessToken) {
+        if (response.status === 'not_authorized' || response.status === 'unknown') {
+          pushToast('info', 'Connexion annulée')
+        } else {
+          pushToast('error', 'Connexion Meta refusée')
+        }
+        return
+      }
+
+      const shortToken = response.authResponse.accessToken
+
+      const res = await fetch('/api/integrations/connect/whatsapp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          showroom_id:  showroomId,
+          access_token: shortToken,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.ok) {
+        pushToast('error', json?.error || 'Connexion WhatsApp échouée')
+        return
+      }
+      await loadIntegrations(showroomId)
+      const phone = json.phone_number ? ` (${json.phone_number})` : ''
+      pushToast('success', `WhatsApp Business connecté${phone}`)
+    } catch (err) {
+      pushToast('error', err instanceof Error ? err.message : 'Erreur SDK Facebook')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function handleDisconnect(card: ProviderCard) {
     if (!showroomId) return
     if (!confirm(`Déconnecter ${card.title} ?`)) return
@@ -434,11 +491,19 @@ export default function IntegrationsPage() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => setModalProvider(card)}
+                      onClick={() =>
+                        card.id === 'whatsapp'
+                          ? handleWhatsAppEmbeddedSignup(card)
+                          : setModalProvider(card)
+                      }
                       disabled={isBusy || !showroomId}
                       className="px-3 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
                     >
-                      <Plug className="w-3.5 h-3.5" />
+                      {isBusy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Plug className="w-3.5 h-3.5" />
+                      )}
                       Connecter {card.title.split(' ')[0]}
                     </button>
                   )}
