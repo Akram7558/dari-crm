@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Kanban,
   BellRing,
+  Plug,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -109,6 +110,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <Settings className="w-4 h-4" />
             Paramètres
+          </Link>
+          <Link
+            href="/dashboard/settings/integrations"
+            className={cn(
+              'flex items-center gap-2.5 pl-9 pr-3 py-1.5 rounded-md text-xs transition-colors',
+              pathname.startsWith('/dashboard/settings/integrations')
+                ? 'bg-white/10 text-white'
+                : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+            )}
+          >
+            <Plug className="w-3.5 h-3.5" />
+            Intégrations
           </Link>
           <button
             onClick={handleLogout}

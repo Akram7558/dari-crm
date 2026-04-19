@@ -142,6 +142,29 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   vendor_inactive: 'Vendeur inactif',
 }
 
+// ── Integrations (Meta OAuth) ────────────────────────────────────
+
+export type IntegrationProvider = 'whatsapp' | 'messenger' | 'instagram'
+
+export type Integration = {
+  id: string
+  showroom_id: string
+  provider: IntegrationProvider
+  account_name: string | null
+  account_id: string | null
+  phone_number: string | null
+  access_token: string | null
+  expires_at: string | null
+  is_active: boolean
+  connected_at: string
+}
+
+export const INTEGRATION_PROVIDER_LABELS: Record<IntegrationProvider, string> = {
+  whatsapp:  'WhatsApp Business',
+  messenger: 'Facebook Messenger',
+  instagram: 'Instagram Business',
+}
+
 // ── 58 Wilayas d'Algérie ─────────────────────────────────────────
 export const WILAYAS_58: string[] = [
   'Adrar', 'Chlef', 'Laghouat', 'Oum El Bouaghi', 'Batna', 'Béjaïa',
