@@ -29,6 +29,8 @@ export type Vehicle = {
   price_dzd: number | null
   status: 'available' | 'reserved' | 'sold'
   created_at: string
+  image_url: string | null
+  reserved_by_lead_id: string | null
 }
 
 export type LeadSource =
