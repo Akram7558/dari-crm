@@ -193,7 +193,7 @@ export default function ActivitesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Activités</h1>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Activités</h1>
           <p className="text-sm text-gray-500 mt-0.5">{activities.length} activité{activities.length > 1 ? 's' : ''} enregistrée{activities.length > 1 ? 's' : ''}</p>
         </div>
         <button

@@ -413,7 +413,7 @@ export default function IntegrationsPage() {
     <div className="p-6 space-y-6 max-w-4xl">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Intégrations</h1>
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Intégrations</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Connectez vos réseaux sociaux pour capturer automatiquement les leads
         </p>

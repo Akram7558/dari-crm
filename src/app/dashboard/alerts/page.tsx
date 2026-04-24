@@ -119,7 +119,7 @@ export default function AlertsPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Alertes</h1>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">Alertes</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {items.length} alerte{items.length > 1 ? 's' : ''} ·{' '}
             <span className={unreadCount > 0 ? 'text-red-600 font-medium' : ''}>
