@@ -15,6 +15,7 @@ import {
   Pencil,
   Trash2,
   X,
+  MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -47,6 +48,28 @@ function formatDate(d: string): string {
 // VIP heuristic: high budget signals priority lead.
 const VIP_BUDGET_THRESHOLD = 5_000_000
 
+// ── Phone formatting (Algeria default) ──────────────────────────────
+// Returns the phone in international format suitable for tel:/sms: links
+// (with leading +) and for wa.me URLs (digits only, no +).
+// Returns null when no usable number is provided.
+function formatPhoneIntl(raw: string | null | undefined): { tel: string; wa: string } | null {
+  if (!raw) return null
+  // Keep only digits and a possible leading "+"
+  let s = raw.trim().replace(/[^\d+]/g, '')
+  if (!s) return null
+  if (s.startsWith('+')) {
+    const digits = s.slice(1)
+    if (!digits) return null
+    return { tel: `+${digits}`, wa: digits }
+  }
+  if (s.startsWith('00')) s = s.slice(2)
+  if (s.startsWith('0')) s = s.slice(1)
+  // If the user already typed "213…", don't double-prefix.
+  const digits = s.startsWith('213') ? s : `213${s}`
+  if (!digits) return null
+  return { tel: `+${digits}`, wa: digits }
+}
+
 const statusStyles = {
   'Chaud': 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400 border-rose-200/50 dark:border-rose-500/20',
   'En cours': 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400 border-amber-200/50 dark:border-amber-500/20',
@@ -66,6 +89,9 @@ export function ProspectsView() {
   const [statusFilter, setStatusFilter] = useState<'all' | Lead['status']>('all')
   const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [contactPopover, setContactPopover] = useState<
+    { id: string; kind: 'call' | 'msg' } | null
+  >(null)
 
   async function fetchLeads() {
     const { data } = await supabase
@@ -77,22 +103,26 @@ export function ProspectsView() {
 
   useEffect(() => { fetchLeads() }, [])
 
-  // Close kebab menu on outside click / escape
+  // Close kebab menu / contact popover on outside click / escape
   useEffect(() => {
-    if (!menuOpenId) return
+    if (!menuOpenId && !contactPopover) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as HTMLElement | null
       if (t && t.closest('[data-lead-menu]')) return
+      if (t && t.closest('[data-contact-popover]')) return
       setMenuOpenId(null)
+      setContactPopover(null)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpenId(null) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setMenuOpenId(null); setContactPopover(null) }
+    }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [menuOpenId])
+  }, [menuOpenId, contactPopover])
 
   async function deleteLead(id: string) {
     if (!confirm('Supprimer ce prospect ? Cette action est irréversible.')) return
@@ -380,42 +410,112 @@ export function ProspectsView() {
                   </td>
                   <td className="py-4 px-6 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <a
-                        href={prospect.rawPhone ? `tel:${prospect.rawPhone}` : undefined}
-                        onClick={(e) => { if (!prospect.rawPhone) e.preventDefault() }}
-                        aria-disabled={!prospect.rawPhone}
-                        className={cn(
-                          "p-2 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 rounded-xl transition-colors shadow-sm inline-flex items-center justify-center",
-                          !prospect.rawPhone && "opacity-40 cursor-not-allowed"
-                        )}
-                        title={prospect.rawPhone ? `Appeler ${prospect.rawPhone}` : 'Aucun numéro'}
-                      >
-                        <Phone className="w-4 h-4" />
-                      </a>
-                      <a
-                        href={
-                          prospect.rawEmail
-                            ? `mailto:${prospect.rawEmail}`
-                            : prospect.rawPhone
-                              ? `sms:${prospect.rawPhone}`
-                              : undefined
-                        }
-                        onClick={(e) => { if (!prospect.rawEmail && !prospect.rawPhone) e.preventDefault() }}
-                        aria-disabled={!prospect.rawEmail && !prospect.rawPhone}
-                        className={cn(
-                          "p-2 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl transition-colors shadow-sm inline-flex items-center justify-center",
-                          !prospect.rawEmail && !prospect.rawPhone && "opacity-40 cursor-not-allowed"
-                        )}
-                        title={
-                          prospect.rawEmail
-                            ? `Email à ${prospect.rawEmail}`
-                            : prospect.rawPhone
-                              ? `SMS à ${prospect.rawPhone}`
-                              : 'Aucun contact'
-                        }
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                      </a>
+                      {(() => {
+                        const intl = formatPhoneIntl(prospect.rawPhone)
+                        const hasPhone = !!intl
+                        const noPhoneTitle = 'Pas de numéro de téléphone'
+                        return (
+                          <>
+                            {/* Call button + popover */}
+                            <div className="relative" data-contact-popover>
+                              <button
+                                type="button"
+                                disabled={!hasPhone}
+                                onClick={() =>
+                                  setContactPopover((cur) =>
+                                    cur && cur.id === prospect.id && cur.kind === 'call'
+                                      ? null
+                                      : { id: prospect.id, kind: 'call' }
+                                  )
+                                }
+                                aria-haspopup="menu"
+                                aria-expanded={contactPopover?.id === prospect.id && contactPopover?.kind === 'call'}
+                                className={cn(
+                                  "p-2 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 rounded-xl transition-colors shadow-sm inline-flex items-center justify-center",
+                                  !hasPhone && "opacity-40 cursor-not-allowed hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
+                                )}
+                                title={hasPhone ? `Appeler ${prospect.rawPhone}` : noPhoneTitle}
+                              >
+                                <Phone className="w-4 h-4" />
+                              </button>
+                              {hasPhone && contactPopover?.id === prospect.id && contactPopover?.kind === 'call' && (
+                                <div
+                                  role="menu"
+                                  className="absolute right-0 top-full mt-1 z-30 w-52 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl py-1 text-left"
+                                >
+                                  <a
+                                    href={`tel:${intl!.tel}`}
+                                    onClick={() => setContactPopover(null)}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                  >
+                                    <Phone className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                    Appel téléphonique
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/${intl!.wa}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={() => setContactPopover(null)}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                  >
+                                    <MessageCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                    Appel WhatsApp
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Message button + popover */}
+                            <div className="relative" data-contact-popover>
+                              <button
+                                type="button"
+                                disabled={!hasPhone}
+                                onClick={() =>
+                                  setContactPopover((cur) =>
+                                    cur && cur.id === prospect.id && cur.kind === 'msg'
+                                      ? null
+                                      : { id: prospect.id, kind: 'msg' }
+                                  )
+                                }
+                                aria-haspopup="menu"
+                                aria-expanded={contactPopover?.id === prospect.id && contactPopover?.kind === 'msg'}
+                                className={cn(
+                                  "p-2 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl transition-colors shadow-sm inline-flex items-center justify-center",
+                                  !hasPhone && "opacity-40 cursor-not-allowed hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                                )}
+                                title={hasPhone ? `Message à ${prospect.rawPhone}` : noPhoneTitle}
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                              {hasPhone && contactPopover?.id === prospect.id && contactPopover?.kind === 'msg' && (
+                                <div
+                                  role="menu"
+                                  className="absolute right-0 top-full mt-1 z-30 w-52 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl py-1 text-left"
+                                >
+                                  <a
+                                    href={`sms:${intl!.tel}`}
+                                    onClick={() => setContactPopover(null)}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                  >
+                                    <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                    SMS
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/${intl!.wa}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={() => setContactPopover(null)}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                  >
+                                    <MessageCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                    WhatsApp
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )
+                      })()}
                       <div className="relative" data-lead-menu>
                         <button
                           onClick={() => setMenuOpenId(menuOpenId === prospect.id ? null : prospect.id)}
