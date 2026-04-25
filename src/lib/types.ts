@@ -93,12 +93,12 @@ export const LEAD_SUIVI_VALUES: LeadSuivi[] = [
 ]
 
 export const LEAD_SUIVI_BADGE_CLASSES: Record<LeadSuivi, string> = {
-  tentative_1:  'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400 border-yellow-200/60 dark:border-yellow-500/20',
-  tentative_2:  'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border-orange-200/60 dark:border-orange-500/20',
-  tentative_3:  'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400 border-red-200/60 dark:border-red-500/20',
-  reporter:     'bg-amber-200 text-amber-900 dark:bg-amber-700/30 dark:text-amber-300 border-amber-400/60 dark:border-amber-700/40',
-  rdv_planifie: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-500/20',
-  perdu:        'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200/60 dark:border-slate-700/50',
+  tentative_1:  'bg-yellow-300 text-yellow-900 border-yellow-400 dark:bg-yellow-400 dark:text-yellow-950 dark:border-yellow-500',
+  tentative_2:  'bg-orange-500 text-white border-orange-600 dark:bg-orange-500 dark:text-white dark:border-orange-600',
+  tentative_3:  'bg-red-600 text-white border-red-700 dark:bg-red-600 dark:text-white dark:border-red-700',
+  reporter:     'bg-orange-700 text-white border-orange-800 dark:bg-orange-700 dark:text-white dark:border-orange-800',
+  rdv_planifie: 'bg-emerald-600 text-white border-emerald-700 dark:bg-emerald-600 dark:text-white dark:border-emerald-700',
+  perdu:        'bg-slate-500 text-white border-slate-600 dark:bg-slate-600 dark:text-white dark:border-slate-700',
 }
 
 export type Activity = {

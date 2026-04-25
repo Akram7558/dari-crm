@@ -202,6 +202,7 @@ export function ProspectsView() {
           isLinked: !!linkedLabel,
           status: toDisplayStatus(l.status),
           suivi: (l.suivi ?? null) as LeadSuivi | null,
+          notes: l.notes ?? '',
           source: LEAD_SOURCE_LABELS[l.source] ?? l.source,
           date: formatDate(l.created_at),
           isVip: !!(l.budget_dzd && l.budget_dzd >= VIP_BUDGET_THRESHOLD),
@@ -358,23 +359,25 @@ export function ProspectsView() {
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{prospect.source}</div>
                   </td>
-                  <td className="py-4 px-6">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                  <td className="py-4 px-6 max-w-[220px]">
+                    {prospect.suivi ? (
                       <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
-                        statusStyles[prospect.status as keyof typeof statusStyles] || statusStyles['Nouveau']
+                        "inline-flex px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
+                        LEAD_SUIVI_BADGE_CLASSES[prospect.suivi]
                       )}>
-                        {prospect.status}
+                        {LEAD_SUIVI_LABELS[prospect.suivi]}
                       </span>
-                      {prospect.suivi && (
-                        <span className={cn(
-                          "px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
-                          LEAD_SUIVI_BADGE_CLASSES[prospect.suivi]
-                        )}>
-                          {LEAD_SUIVI_LABELS[prospect.suivi]}
-                        </span>
-                      )}
-                    </div>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-300 dark:text-slate-600">—</span>
+                    )}
+                    {prospect.notes && (
+                      <div
+                        title={prospect.notes}
+                        className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 truncate"
+                      >
+                        {prospect.notes}
+                      </div>
+                    )}
                   </td>
                   <td className="py-4 px-6 text-sm font-bold text-slate-500 dark:text-slate-400">
                     {prospect.date}
