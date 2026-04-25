@@ -7,7 +7,7 @@ import { ALGERIA_BRANDS, MODELS_BY_BRAND, YEARS, type Brand } from '@/lib/vehicl
 // Brand kept for the modal's known-brand model dropdown; filter uses dynamic DB values.
 import {
   Car, Plus, MoreVertical, Loader2, Search, User,
-  Pencil, Camera, ClipboardList, Trash2,
+  Pencil, Camera, ClipboardList, Trash2, X,
 } from 'lucide-react'
 
 type LeadLite = { id: string; full_name: string; phone: string | null; wilaya?: string | null }
@@ -86,14 +86,9 @@ function AddVehicleModal({
     if (initial) {
       // Preserve whatever brand string is in the DB — even if it's a custom one.
       const brand = initial.brand
-      const knownBrand = (ALGERIA_BRANDS as readonly string[]).includes(brand)
-      const models = knownBrand ? (MODELS_BY_BRAND[brand as Brand] ?? ['Autre']) : []
-      const model = knownBrand
-        ? (models.includes(initial.model) ? initial.model : models[0])
-        : initial.model
       return {
         brand,
-        model,
+        model: initial.model,
         year: String(initial.year ?? defaultYear),
         color: initial.color ?? '',
         price_dzd: initial.price_dzd != null ? String(initial.price_dzd) : '',
@@ -105,9 +100,10 @@ function AddVehicleModal({
         type_moteur: initial.type_moteur ?? 'Essence',
       }
     }
+    // Empty defaults — user must pick or add a brand/model.
     return {
-      brand: 'Renault' as string,
-      model: MODELS_BY_BRAND['Renault'][0] as string,
+      brand: '',
+      model: '',
       year: String(defaultYear),
       color: '',
       price_dzd: '',
@@ -123,21 +119,35 @@ function AddVehicleModal({
   const [form, setForm] = useState(seedForm)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+  // Toggles for the "+ / x" custom-entry pattern.
+  const [customBrandMode, setCustomBrandMode] = useState(false)
+  const [customModelMode, setCustomModelMode] = useState(false)
 
   // Reseed when opened with a different vehicle
   useEffect(() => {
     if (open) {
-      setForm(seedForm())
+      const seeded = seedForm()
+      setForm(seeded)
       setError('')
+      // When editing a vehicle whose brand/model aren't in the catalog, start in custom mode.
+      const knownBrand = (ALGERIA_BRANDS as readonly string[]).includes(seeded.brand)
+      const knownModel = knownBrand
+        ? (MODELS_BY_BRAND[seeded.brand as Brand] ?? []).includes(seeded.model)
+        : false
+      setCustomBrandMode(!!seeded.brand && !knownBrand)
+      setCustomModelMode(!!seeded.model && knownBrand && !knownModel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial?.id])
 
-  // Custom brand = anything the user typed that isn't in our known list.
-  const isKnownBrand = (ALGERIA_BRANDS as readonly string[]).includes(form.brand)
+  // Custom brand = the user toggled "+ " on the brand field, or the brand isn't in the catalog.
+  const isKnownBrand = !customBrandMode && (ALGERIA_BRANDS as readonly string[]).includes(form.brand)
   const modelOptions = isKnownBrand
     ? (MODELS_BY_BRAND[form.brand as Brand] ?? ['Autre'])
     : []
+  // Force a text input for the model whenever the brand isn't a known one,
+  // or when the user explicitly toggled "+ " on the model field.
+  const useTextForModel = !isKnownBrand || customModelMode
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -182,8 +192,8 @@ function AddVehicleModal({
     if (err) { setError(err.message); return }
     if (!isEdit) {
       setForm({
-        brand: 'Renault',
-        model: MODELS_BY_BRAND['Renault'][0],
+        brand: '',
+        model: '',
         year: String(defaultYear),
         color: '',
         price_dzd: '',
@@ -194,6 +204,8 @@ function AddVehicleModal({
         carte_grise: '',
         type_moteur: 'Essence',
       })
+      setCustomBrandMode(false)
+      setCustomModelMode(false)
     }
     setError('')
     onSaved()
@@ -214,44 +226,91 @@ function AddVehicleModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Marque *</label>
-              <input
-                list="vehicle-brands-list"
-                value={form.brand}
-                onChange={e => {
-                  const brand = e.target.value
-                  const known = (ALGERIA_BRANDS as readonly string[]).includes(brand)
-                  // When user picks/types a known brand, default model to its first option.
-                  // When they type a custom brand, clear the model so they can type their own.
-                  const nextModel = known
-                    ? (MODELS_BY_BRAND[brand as Brand] ?? ['Autre'])[0]
-                    : ''
-                  setForm(f => ({ ...f, brand, model: nextModel }))
-                }}
-                placeholder="Choisir ou saisir une marque"
-                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
-              />
-              <datalist id="vehicle-brands-list">
-                {ALGERIA_BRANDS.map(b => <option key={b} value={b} />)}
-              </datalist>
+              <div className="flex items-center gap-1.5">
+                {customBrandMode ? (
+                  <input
+                    autoFocus
+                    value={form.brand}
+                    onChange={e => setForm(f => ({ ...f, brand: e.target.value }))}
+                    placeholder="Nouvelle marque"
+                    className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                  />
+                ) : (
+                  <select
+                    value={form.brand}
+                    onChange={e => setForm(f => ({ ...f, brand: e.target.value, model: '' }))}
+                    className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                  >
+                    <option value="">Choisir une marque</option>
+                    {ALGERIA_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customBrandMode) {
+                      // Cancel custom mode → back to dropdown, clear value.
+                      setCustomBrandMode(false)
+                      setForm(f => ({ ...f, brand: '', model: '' }))
+                      setCustomModelMode(false)
+                    } else {
+                      setCustomBrandMode(true)
+                      setForm(f => ({ ...f, brand: '', model: '' }))
+                      setCustomModelMode(false)
+                    }
+                  }}
+                  className="shrink-0 w-9 h-9 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition flex items-center justify-center"
+                  aria-label={customBrandMode ? 'Annuler la saisie personnalisée' : 'Ajouter une marque personnalisée'}
+                  title={customBrandMode ? 'Annuler' : 'Ajouter une marque personnalisée'}
+                >
+                  {customBrandMode ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Modèle *</label>
-              {isKnownBrand ? (
-                <select
-                  value={form.model}
-                  onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
-                  className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
-                >
-                  {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              ) : (
-                <input
-                  value={form.model}
-                  onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
-                  placeholder="ex. Modèle X"
-                  className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
-                />
-              )}
+              <div className="flex items-center gap-1.5">
+                {useTextForModel ? (
+                  <input
+                    value={form.model}
+                    onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                    placeholder="ex. Modèle X"
+                    className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                  />
+                ) : (
+                  <select
+                    value={form.model}
+                    onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                    className="flex-1 min-w-0 h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                  >
+                    <option value="">Choisir un modèle</option>
+                    {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                )}
+                {/* The toggle only matters when the brand is known — for a custom brand
+                    the model is already a free-text input. */}
+                {isKnownBrand ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (customModelMode) {
+                        setCustomModelMode(false)
+                        setForm(f => ({ ...f, model: '' }))
+                      } else {
+                        setCustomModelMode(true)
+                        setForm(f => ({ ...f, model: '' }))
+                      }
+                    }}
+                    className="shrink-0 w-9 h-9 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition flex items-center justify-center"
+                    aria-label={customModelMode ? 'Annuler la saisie personnalisée' : 'Ajouter un modèle personnalisé'}
+                    title={customModelMode ? 'Annuler' : 'Ajouter un modèle personnalisé'}
+                  >
+                    {customModelMode ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  </button>
+                ) : (
+                  <span className="shrink-0 w-9 h-9" aria-hidden />
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Année</label>
