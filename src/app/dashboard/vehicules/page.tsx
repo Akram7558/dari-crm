@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { VEHICLE_STATUS_LABELS, type Vehicle } from '@/lib/types'
 import { ALGERIA_BRANDS, MODELS_BY_BRAND, YEARS, type Brand } from '@/lib/vehicle-catalog'
+// Brand kept for the modal's known-brand model dropdown; filter uses dynamic DB values.
 import {
   Car, Plus, MoreVertical, Loader2, Search, User,
   Pencil, Camera, ClipboardList, Trash2,
@@ -946,7 +947,7 @@ function VehicleCard({
 export default function VehiculesPage() {
   const [vehicles,   setVehicles]   = useState<Vehicle[]>([])
   const [loading,    setLoading]    = useState(true)
-  const [marque,     setMarque]     = useState<'' | Brand>('')
+  const [marque,     setMarque]     = useState<string>('')
   const [modele,     setModele]     = useState('')
   const [annee,      setAnnee]      = useState('')
   const [statusFilter, setStatusFilter] = useState<Vehicle['status'] | ''>('')
@@ -985,7 +986,23 @@ export default function VehiculesPage() {
 
   useEffect(() => { fetchVehicles() }, [])
 
-  const modelOptionsForFilter = marque ? (MODELS_BY_BRAND[marque] ?? []) : []
+  // Pull unique marques/modèles directly from the DB rows so any custom brand
+  // typed in the modal appears in the filters immediately after save.
+  const brandOptionsForFilter = useMemo(() => {
+    const set = new Set<string>()
+    for (const v of vehicles) if (v.brand) set.add(v.brand)
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [vehicles])
+
+  const modelOptionsForFilter = useMemo(() => {
+    const set = new Set<string>()
+    for (const v of vehicles) {
+      if (!v.model) continue
+      if (marque && v.brand !== marque) continue
+      set.add(v.model)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [vehicles, marque])
 
   const filtered = useMemo(() => {
     return vehicles.filter(v => {
@@ -1147,14 +1164,13 @@ export default function VehiculesPage() {
           <select
             value={marque}
             onChange={e => {
-              const next = e.target.value as '' | Brand
-              setMarque(next)
+              setMarque(e.target.value)
               setModele('')
             }}
             className="w-full bg-card border border-border rounded-lg px-4 py-2.5 text-sm text-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition"
           >
             <option value="">Toutes les marques</option>
-            {ALGERIA_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+            {brandOptionsForFilter.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         </div>
         <div>
