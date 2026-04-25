@@ -66,6 +66,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => { document.body.style.overflow = '' }
   }, [mobileOpen])
 
+  // Derive page title from current path for the header.
+  const pageTitle = (() => {
+    const match = navItems.find((it) =>
+      it.href === pathname ||
+      (it.href !== '/dashboard' && pathname.startsWith(it.href))
+    )
+    if (match) return match.label
+    if (pathname.startsWith('/dashboard/settings/integrations')) return 'Intégrations'
+    if (pathname.startsWith('/dashboard/parametres')) return 'Paramètres'
+    return 'Tableau de bord'
+  })()
+
+  const updatedLabel = (() => {
+    const now = new Date()
+    const hh = now.getHours().toString().padStart(2, '0')
+    const mm = now.getMinutes().toString().padStart(2, '0')
+    return `Mise à jour : Aujourd'hui, ${hh}:${mm}`
+  })()
+
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/')
@@ -75,17 +94,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sidebarBody = (
     <>
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-gray-200 dark:border-white/[0.06] flex-shrink-0">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-100 border border-indigo-200 dark:bg-indigo-500/20 dark:border-indigo-500/30">
-          <Car className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+      <div className="flex items-center gap-3 px-6 h-20 flex-shrink-0">
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600">
+          <Car className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1">
-          <p className="text-gray-900 dark:text-white text-base font-bold leading-none tracking-tight">AutoDex</p>
+          <p className="text-zinc-900 dark:text-white text-xl font-bold uppercase tracking-tight leading-none">AutoDex</p>
         </div>
         {/* Close button — mobile drawer only */}
         <button
           onClick={() => setMobileOpen(false)}
-          className="md:hidden p-1.5 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-white/60 dark:hover:text-white dark:hover:bg-white/5 transition-colors"
+          className="md:hidden p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-white dark:hover:bg-zinc-900 transition-colors"
           aria-label="Fermer le menu"
         >
           <X className="w-4 h-4" />
@@ -93,7 +112,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 pt-4 pb-2 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-4 pt-2 pb-2 space-y-2 overflow-y-auto">
         {navItems.map((item) => {
           const Icon     = item.icon
           const isActive =
@@ -105,13 +124,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               href={item.href}
               onClick={() => setMobileOpen(false)}
               className={cn(
-                'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors duration-150',
+                'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
                 isActive
-                  ? 'bg-indigo-50 text-indigo-900 font-medium dark:bg-indigo-500/15 dark:text-white'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-white/45 dark:hover:text-white/75 dark:hover:bg-white/5'
+                  ? 'bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-zinc-900 dark:text-indigo-400 dark:border dark:border-zinc-800'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white border border-transparent'
               )}
             >
-              <Icon className={cn('w-4 h-4 flex-shrink-0', isActive && 'text-indigo-600 dark:text-indigo-400')} />
+              <Icon className="w-4 h-4 flex-shrink-0" />
               {item.label}
             </Link>
           )
@@ -119,15 +138,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </nav>
 
       {/* Footer */}
-      <div className="px-2 pb-3 border-t border-gray-200 dark:border-white/[0.06] pt-2 space-y-0.5">
+      <div className="px-4 py-6 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
         <Link
           href="/dashboard/parametres"
           onClick={() => setMobileOpen(false)}
           className={cn(
-            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors duration-150',
+            'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
             pathname === '/dashboard/parametres'
-              ? 'bg-indigo-50 text-indigo-900 font-medium dark:bg-indigo-500/15 dark:text-white'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-white/45 dark:hover:text-white/75 dark:hover:bg-white/5'
+              ? 'text-indigo-600 dark:text-indigo-400'
+              : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
           )}
         >
           <Settings className="w-4 h-4" />
@@ -137,18 +156,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           href="/dashboard/settings/integrations"
           onClick={() => setMobileOpen(false)}
           className={cn(
-            'flex items-center gap-2.5 pl-9 pr-3 py-1.5 rounded-md text-xs transition-colors duration-150',
+            'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
             pathname.startsWith('/dashboard/settings/integrations')
-              ? 'bg-indigo-50 text-indigo-900 font-medium dark:bg-indigo-500/15 dark:text-white'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-white/40 dark:hover:text-white/70 dark:hover:bg-white/5'
+              ? 'text-indigo-600 dark:text-indigo-400'
+              : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
           )}
         >
-          <Plug className="w-3.5 h-3.5" />
+          <Plug className="w-4 h-4" />
           Intégrations
         </Link>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-white/45 dark:hover:text-white/75 dark:hover:bg-white/5 transition-colors duration-150"
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all"
         >
           <LogOut className="w-4 h-4" />
           Déconnexion
@@ -156,14 +175,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
 
       {/* User pill */}
-      <div className="mx-2 mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 border border-gray-200 dark:bg-white/5 dark:border-white/[0.08]">
-        <div className="w-7 h-7 rounded-full bg-purple-500 flex items-center justify-center flex-shrink-0">
+      <div className="mx-4 mb-4 flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-50 border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800">
+        <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
           <span className="text-white text-[11px] font-bold">{userInitial}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-gray-900 dark:text-white/80 text-xs font-medium truncate">{userName}</p>
+          <p className="text-zinc-900 dark:text-white text-xs font-semibold truncate">{userName}</p>
         </div>
-        <MoreVertical className="w-3.5 h-3.5 text-gray-400 dark:text-white/30 flex-shrink-0" />
+        <MoreVertical className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500 flex-shrink-0" />
       </div>
     </>
   )
@@ -171,7 +190,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* ── Desktop sidebar ─────────────────────────────────── */}
-      <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-200 dark:bg-background dark:border-white/[0.06] flex-shrink-0">
+      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-zinc-200 shadow-sm dark:bg-zinc-950 dark:border-zinc-800 dark:shadow-none flex-shrink-0 transition-colors duration-500">
         {sidebarBody}
       </aside>
 
@@ -188,7 +207,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Drawer */}
       <aside
         className={cn(
-          'md:hidden fixed inset-y-0 left-0 z-50 flex flex-col w-64 bg-white border-r border-gray-200 dark:bg-background dark:border-white/[0.06]',
+          'md:hidden fixed inset-y-0 left-0 z-50 flex flex-col w-64 bg-white border-r border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800',
           'transform transition-transform duration-300 ease-in-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
@@ -201,21 +220,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ── Main content ────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="flex items-center justify-between h-14 px-4 md:px-6 bg-background border-b border-border/60 flex-shrink-0">
-          <div className="flex items-center gap-2 text-sm min-w-0">
+        <header className="flex items-center justify-between h-20 px-4 md:px-10 bg-background flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Hamburger — mobile only */}
             <button
               onClick={() => setMobileOpen(true)}
-              className="md:hidden p-2 -ml-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="md:hidden p-2 -ml-2 rounded-xl text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
               aria-label="Ouvrir le menu"
             >
               <Menu className="w-5 h-5" />
             </button>
+            <div className="flex flex-col min-w-0">
+              <h1 className="text-xl font-black uppercase tracking-tighter text-zinc-900 dark:text-white truncate">
+                {pageTitle}
+              </h1>
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                {updatedLabel}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <ThemeToggle />
             <NotificationBell userId={userId} />
-            <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
               <span className="text-white text-xs font-bold">{userInitial}</span>
             </div>
           </div>

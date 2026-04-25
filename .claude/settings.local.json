@@ -18,7 +18,12 @@
       "Bash(git commit -m ':*)",
       "Bash(node -e \"const l = require\\('lucide-react'\\); const keys = Object.keys\\(l\\); console.log\\('Facebook?', keys.includes\\('Facebook'\\), 'Instagram?', keys.includes\\('Instagram'\\), 'MessageSquare?', keys.includes\\('MessageSquare'\\), 'AtSign?', keys.includes\\('AtSign'\\), 'Camera?', keys.includes\\('Camera'\\), 'Phone?', keys.includes\\('Phone'\\)\\)\")",
       "Bash(npx eslint:*)",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(git checkout *)",
+      "Bash(git commit -m ' *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(git commit *)"
     ]
   }
 }
