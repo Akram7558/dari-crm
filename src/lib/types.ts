@@ -31,6 +31,11 @@ export type Vehicle = {
   created_at: string
   image_url: string | null
   reserved_by_lead_id: string | null
+  kilometrage: number | null
+  etat_carrosserie: string | null
+  finition: string | null
+  carte_grise: string | null
+  type_moteur: string | null
 }
 
 export type LeadSource =

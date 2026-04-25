@@ -42,7 +42,30 @@ function isMissingColumnError(err: unknown): boolean {
   const e = err as { code?: string; message?: string }
   if (e.code === '42703' || e.code === 'PGRST204') return true
   const msg = (e.message ?? '').toLowerCase()
-  return msg.includes('image_url') || msg.includes('reserved_by_lead_id') || msg.includes('column') && msg.includes('does not exist')
+  return (
+    msg.includes('image_url') ||
+    msg.includes('reserved_by_lead_id') ||
+    msg.includes('kilometrage') ||
+    msg.includes('etat_carrosserie') ||
+    msg.includes('finition') ||
+    msg.includes('carte_grise') ||
+    msg.includes('type_moteur') ||
+    (msg.includes('column') && msg.includes('does not exist'))
+  )
+}
+
+const VEHICLE_DETAIL_KEYS = [
+  'kilometrage',
+  'etat_carrosserie',
+  'finition',
+  'carte_grise',
+  'type_moteur',
+] as const
+
+function stripVehicleDetailKeys(p: Record<string, unknown>) {
+  const out = { ...p }
+  for (const k of VEHICLE_DETAIL_KEYS) delete out[k]
+  return out
 }
 
 // ── Add / Edit Vehicle Modal ─────────────────────────────────
@@ -74,6 +97,11 @@ function AddVehicleModal({
         color: initial.color ?? '',
         price_dzd: initial.price_dzd != null ? String(initial.price_dzd) : '',
         status: initial.status,
+        kilometrage: initial.kilometrage != null ? String(initial.kilometrage) : '',
+        etat_carrosserie: initial.etat_carrosserie ?? '',
+        finition: initial.finition ?? '',
+        carte_grise: initial.carte_grise ?? '',
+        type_moteur: initial.type_moteur ?? 'Essence',
       }
     }
     return {
@@ -83,6 +111,11 @@ function AddVehicleModal({
       color: '',
       price_dzd: '',
       status: 'available' as Vehicle['status'],
+      kilometrage: '',
+      etat_carrosserie: '',
+      finition: '',
+      carte_grise: '',
+      type_moteur: 'Essence',
     }
   }
 
@@ -110,25 +143,35 @@ function AddVehicleModal({
     if (!form.brand || !form.model) { setError('Marque et modèle sont requis.'); return }
     setSaving(true)
     const payload: Record<string, unknown> = {
-      brand:     form.brand,
-      model:     form.model.trim(),
-      year:      form.year ? parseInt(form.year) : null,
-      color:     form.color || null,
-      price_dzd: form.price_dzd ? parseFloat(form.price_dzd.replace(/\s/g, '')) : null,
-      status:    form.status,
+      brand:            form.brand,
+      model:            form.model.trim(),
+      year:             form.year ? parseInt(form.year) : null,
+      color:            form.color || null,
+      price_dzd:        form.price_dzd ? parseFloat(form.price_dzd.replace(/\s/g, '')) : null,
+      status:           form.status,
+      kilometrage:      form.kilometrage ? parseInt(form.kilometrage.replace(/\s/g, ''), 10) : null,
+      etat_carrosserie: form.etat_carrosserie.trim() || null,
+      finition:         form.finition.trim() || null,
+      carte_grise:      form.carte_grise.trim() || null,
+      type_moteur:      form.type_moteur || null,
     }
 
     let err: { message: string } | null = null
     if (isEdit && initial) {
       const res = await supabase.from('vehicles').update(payload).eq('id', initial.id)
       err = res.error
+      if (err && isMissingColumnError(err)) {
+        const retry = await supabase.from('vehicles').update(stripVehicleDetailKeys(payload)).eq('id', initial.id)
+        err = retry.error
+      }
     } else {
       payload.reserved_by_lead_id = null
       const res = await supabase.from('vehicles').insert([payload])
       err = res.error
       if (err && isMissingColumnError(err)) {
-        const { reserved_by_lead_id: _omit, ...stripped } = payload
+        const { reserved_by_lead_id: _omit, ...rest } = payload
         void _omit
+        const stripped = stripVehicleDetailKeys(rest)
         const retry = await supabase.from('vehicles').insert([stripped])
         err = retry.error
       }
@@ -144,6 +187,11 @@ function AddVehicleModal({
         color: '',
         price_dzd: '',
         status: 'available',
+        kilometrage: '',
+        etat_carrosserie: '',
+        finition: '',
+        carte_grise: '',
+        type_moteur: 'Essence',
       })
     }
     setError('')
@@ -154,7 +202,7 @@ function AddVehicleModal({
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
-      <div className="rounded-2xl bg-card border border-border shadow-2xl w-full max-w-md">
+      <div className="rounded-2xl bg-card border border-border shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
           <h2 className="text-base font-semibold text-foreground">
             {isEdit ? 'Modifier le véhicule' : 'Ajouter un véhicule'}
@@ -243,6 +291,57 @@ function AddVehicleModal({
                 <option value="reserved">Réservé</option>
                 <option value="sold">Vendu</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Kilométrage</label>
+              <input
+                type="number"
+                min={0}
+                value={form.kilometrage}
+                onChange={e => setForm(f => ({ ...f, kilometrage: e.target.value }))}
+                placeholder="ex. 45000 km"
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Type du moteur</label>
+              <select
+                value={form.type_moteur}
+                onChange={e => setForm(f => ({ ...f, type_moteur: e.target.value }))}
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              >
+                <option value="Essence">Essence</option>
+                <option value="Essence/Hybride">Essence/Hybride</option>
+                <option value="Diesel">Diesel</option>
+                <option value="Électrique">Électrique</option>
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-1">État de la carrosserie</label>
+              <input
+                value={form.etat_carrosserie}
+                onChange={e => setForm(f => ({ ...f, etat_carrosserie: e.target.value }))}
+                placeholder="ex. Excellent, Rayures légères"
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Finition</label>
+              <input
+                value={form.finition}
+                onChange={e => setForm(f => ({ ...f, finition: e.target.value }))}
+                placeholder="ex. GT Line, Allure, Confort"
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Carte grise</label>
+              <input
+                value={form.carte_grise}
+                onChange={e => setForm(f => ({ ...f, carte_grise: e.target.value }))}
+                placeholder="ex. Saida, En cours"
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              />
             </div>
           </div>
           {error && <p className="text-red-500 text-xs">{error}</p>}
@@ -432,6 +531,14 @@ function VehicleDetailsModal({
             <DetailField label="Couleur" value={vehicle.color ?? '—'} />
             <DetailField label="VIN" value={vehicle.vin ?? '—'} />
             <DetailField label="Prix" value={formatPrice(vehicle.price_dzd)} />
+            <DetailField
+              label="Kilométrage"
+              value={vehicle.kilometrage != null ? `${new Intl.NumberFormat('fr-DZ').format(vehicle.kilometrage)} km` : '—'}
+            />
+            <DetailField label="Type du moteur" value={vehicle.type_moteur ?? '—'} />
+            <DetailField label="Finition" value={vehicle.finition ?? '—'} />
+            <DetailField label="État de la carrosserie" value={vehicle.etat_carrosserie ?? '—'} />
+            <DetailField label="Carte grise" value={vehicle.carte_grise ?? '—'} />
             <div>
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Statut</p>
               <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${stock.cls}`}>
@@ -777,8 +884,22 @@ function VehicleCard({
         </div>
 
         <div className="mt-2 space-y-0.5">
-          <p className="text-xs text-muted-foreground">Transmission : —</p>
-          <p className="text-xs text-muted-foreground">Carburant : {v.color ?? '—'}</p>
+          <p className="text-xs text-muted-foreground">
+            Carburant : {v.type_moteur ?? '—'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Kilométrage : {v.kilometrage != null ? `${new Intl.NumberFormat('fr-DZ').format(v.kilometrage)} km` : '—'}
+          </p>
+          {v.finition && (
+            <p className="text-xs text-muted-foreground">Finition : {v.finition}</p>
+          )}
+          {v.etat_carrosserie && (
+            <p className="text-xs text-muted-foreground">Carrosserie : {v.etat_carrosserie}</p>
+          )}
+          {v.carte_grise && (
+            <p className="text-xs text-muted-foreground">Carte grise : {v.carte_grise}</p>
+          )}
+          <p className="text-xs text-muted-foreground">Couleur : {v.color ?? '—'}</p>
         </div>
 
         {v.status === 'reserved' && lead && (
