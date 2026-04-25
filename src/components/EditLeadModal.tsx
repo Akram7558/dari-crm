@@ -28,7 +28,25 @@ type EditForm = {
 }
 
 // Statuses that require linking a specific vehicle (for accounting / reports).
-const VEHICLE_LINK_STATUSES: Lead['status'][] = ['proposal', 'won']
+const VEHICLE_LINK_STATUSES: Lead['status'][] = ['qualified', 'proposal', 'won']
+
+// Activity title + type per linked-vehicle status. Each save with a link
+// produces a new entry — never overwriting — so we keep a full audit trail.
+function activityForStatus(
+  status: Lead['status'],
+  vehicleLabel: string
+): { type: 'meeting' | 'status_change'; title: string } | null {
+  switch (status) {
+    case 'qualified':
+      return { type: 'meeting',       title: `RDV planifié pour ${vehicleLabel}` }
+    case 'proposal':
+      return { type: 'status_change', title: `Offre faite sur ${vehicleLabel}` }
+    case 'won':
+      return { type: 'status_change', title: `Vente conclue : ${vehicleLabel}` }
+    default:
+      return null
+  }
+}
 
 function vehicleLabel(v: Vehicle): string {
   const parts = [v.brand, v.model, v.year ? String(v.year) : ''].filter(Boolean)
@@ -143,9 +161,37 @@ export function EditLeadModal({
 
     if (err) { setSaving(false); setError(err.message); return }
 
+    // Audit trail: when a vehicle is linked under one of the tracked statuses,
+    // log a NEW activity each time the link or the status moves. Re-saving
+    // without changing either is a no-op so we don't spam the timeline.
+    if (linkedVehicleId && needsVehicle) {
+      const linked = vehicles.find((v) => v.id === linkedVehicleId)
+      if (linked) {
+        const vehicleLabel = [linked.brand, linked.model, linked.year ? String(linked.year) : '']
+          .filter(Boolean)
+          .join(' ')
+        const meta = activityForStatus(form.status, vehicleLabel)
+        const statusChanged   = lead.status !== form.status
+        const vehicleChanged  = (lead.vehicle_id ?? null) !== linkedVehicleId
+        if (meta && (statusChanged || vehicleChanged)) {
+          const { error: actErr } = await supabase.from('activities').insert([{
+            lead_id: lead.id,
+            type:    meta.type,
+            title:   meta.title,
+            body:    `${lead.full_name} · ${vehicleLabel}`,
+            done:    true,
+          }])
+          if (actErr) {
+            console.warn('[EditLeadModal] failed to log activity:', actErr.message)
+          }
+        }
+      }
+    }
+
     // Cascade: a confirmed sale flips the linked vehicle's status to 'sold'.
-    // For 'proposal' (offre faite) we keep the vehicle as-is — the dedicated
-    // reservation flow on the vehicles page handles the 'reserved' transition.
+    // For 'proposal' (offre faite) and 'qualified' (RDV planifié) we keep
+    // the vehicle as-is — the dedicated reservation flow on the vehicles
+    // page handles the 'reserved' transition.
     if (linkedVehicleId && form.status === 'won') {
       const { error: vErr } = await supabase
         .from('vehicles')
@@ -232,7 +278,7 @@ export function EditLeadModal({
               <p className="text-[11px] text-muted-foreground mt-1">
                 {form.status === 'won'
                   ? 'Le véhicule sera automatiquement marqué comme « Vendu ».'
-                  : 'Le véhicule conservera son statut actuel.'}
+                  : 'Le véhicule conservera son statut actuel. Une activité sera enregistrée dans l\u2019historique.'}
               </p>
             </div>
           )}

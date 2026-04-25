@@ -25,7 +25,7 @@ function toDisplayType(a: Activity): DisplayType {
   // status_change to 'won' if the activity title hints at a win, otherwise 'note'
   if (a.type === 'status_change') {
     const t = a.title.toLowerCase()
-    if (t.includes('vendu') || t.includes('won')) return 'won'
+    if (t.includes('vendu') || t.includes('won') || t.includes('vente') || t.includes('conclue')) return 'won'
     if (t.includes('réservé') || t.includes('proposal') || t.includes('offre')) return 'lead'
     return 'note'
   }
