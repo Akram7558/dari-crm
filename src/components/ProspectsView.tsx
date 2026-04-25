@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import {
   Search,
-  Filter,
   Plus,
   MoreHorizontal,
   Mail,
@@ -14,7 +13,6 @@ import {
   Download,
   Pencil,
   Trash2,
-  X,
   MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -23,7 +21,11 @@ import {
   LEAD_SOURCE_LABELS,
   LEAD_STATUS_LABELS,
   type Lead,
+  type LeadSuivi,
   type Vehicle,
+  LEAD_SUIVI_LABELS,
+  LEAD_SUIVI_VALUES,
+  LEAD_SUIVI_BADGE_CLASSES,
 } from '@/lib/types'
 import { format, isToday, isYesterday } from 'date-fns'
 import { fr } from 'date-fns/locale'
@@ -91,9 +93,7 @@ export function ProspectsView() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [addOpen, setAddOpen] = useState(false)
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [statusFilter, setStatusFilter] = useState<'all' | Lead['status']>('all')
-  const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const [suiviFilter, setSuiviFilter] = useState<'all' | LeadSuivi>('all')
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [contactPopover, setContactPopover] = useState<
     { id: string; kind: 'call' | 'msg' } | null
@@ -169,20 +169,12 @@ export function ProspectsView() {
     URL.revokeObjectURL(url)
   }
 
-  // Available sources discovered from the loaded data
-  const sourceOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const l of leads) if (l.source) set.add(l.source)
-    return Array.from(set)
-  }, [leads])
-
   // Real backend rows shaped for the design template — UI structure unchanged.
   const prospectsData = useMemo(() => {
     const term = search.trim().toLowerCase()
     return leads
       .filter((l) => {
-        if (statusFilter !== 'all' && l.status !== statusFilter) return false
-        if (sourceFilter !== 'all' && l.source !== sourceFilter) return false
+        if (suiviFilter !== 'all' && l.suivi !== suiviFilter) return false
         if (!term) return true
         return (
           l.full_name.toLowerCase().includes(term) ||
@@ -209,12 +201,13 @@ export function ProspectsView() {
           car: linkedLabel ?? l.model_wanted ?? '—',
           isLinked: !!linkedLabel,
           status: toDisplayStatus(l.status),
+          suivi: (l.suivi ?? null) as LeadSuivi | null,
           source: LEAD_SOURCE_LABELS[l.source] ?? l.source,
           date: formatDate(l.created_at),
           isVip: !!(l.budget_dzd && l.budget_dzd >= VIP_BUDGET_THRESHOLD),
         }
       })
-  }, [leads, search, statusFilter, sourceFilter, vehiclesById])
+  }, [leads, search, suiviFilter, vehiclesById])
 
   const total = prospectsData.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -289,86 +282,22 @@ export function ProspectsView() {
             <Search className="absolute left-4 top-3.5 text-slate-400 w-5 h-5 pointer-events-none" />
           </div>
 
-          <button
-            onClick={() => setFilterOpen((v) => !v)}
-            className={cn(
-              "flex items-center gap-2 px-6 py-3 border rounded-2xl text-sm font-bold transition-colors w-full sm:w-auto justify-center",
-              filterOpen
-                ? "bg-indigo-50 dark:bg-indigo-500/10 border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400"
-                : "bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            )}
-          >
-            <Filter className="w-4 h-4" />
-            Filtres
-            {(statusFilter !== 'all' || sourceFilter !== 'all') && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] font-black">
-                {(statusFilter !== 'all' ? 1 : 0) + (sourceFilter !== 'all' ? 1 : 0)}
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* Filter panel */}
-        {filterOpen && (
-          <div className="px-6 pb-6 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Statut</span>
-              {(['all', 'new', 'contacted', 'qualified', 'proposal', 'won', 'lost'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => { setStatusFilter(s); setPage(1) }}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-bold transition-colors border",
-                    statusFilter === s
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  )}
-                >
-                  {s === 'all' ? 'Tous' : LEAD_STATUS_LABELS[s]}
-                </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 shrink-0">
+              Suivi
+            </span>
+            <select
+              value={suiviFilter}
+              onChange={(e) => { setSuiviFilter(e.target.value as 'all' | LeadSuivi); setPage(1) }}
+              className="flex-1 sm:flex-none bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-2xl px-4 py-3 text-sm font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            >
+              <option value="all">Tous</option>
+              {LEAD_SUIVI_VALUES.map((s) => (
+                <option key={s} value={s}>{LEAD_SUIVI_LABELS[s]}</option>
               ))}
-            </div>
-            {sourceOptions.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Source</span>
-                <button
-                  onClick={() => { setSourceFilter('all'); setPage(1) }}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-bold transition-colors border",
-                    sourceFilter === 'all'
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  )}
-                >
-                  Toutes
-                </button>
-                {sourceOptions.map((src) => (
-                  <button
-                    key={src}
-                    onClick={() => { setSourceFilter(src); setPage(1) }}
-                    className={cn(
-                      "px-3 py-1.5 rounded-full text-xs font-bold transition-colors border",
-                      sourceFilter === src
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800"
-                    )}
-                  >
-                    {LEAD_SOURCE_LABELS[src as Lead['source']] ?? src}
-                  </button>
-                ))}
-              </div>
-            )}
-            {(statusFilter !== 'all' || sourceFilter !== 'all') && (
-              <button
-                onClick={() => { setStatusFilter('all'); setSourceFilter('all'); setPage(1) }}
-                className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-                Réinitialiser
-              </button>
-            )}
+            </select>
           </div>
-        )}
+        </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
@@ -430,12 +359,22 @@ export function ProspectsView() {
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{prospect.source}</div>
                   </td>
                   <td className="py-4 px-6">
-                    <span className={cn(
-                      "px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
-                      statusStyles[prospect.status as keyof typeof statusStyles] || statusStyles['Nouveau']
-                    )}>
-                      {prospect.status}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={cn(
+                        "px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
+                        statusStyles[prospect.status as keyof typeof statusStyles] || statusStyles['Nouveau']
+                      )}>
+                        {prospect.status}
+                      </span>
+                      {prospect.suivi && (
+                        <span className={cn(
+                          "px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border",
+                          LEAD_SUIVI_BADGE_CLASSES[prospect.suivi]
+                        )}>
+                          {LEAD_SUIVI_LABELS[prospect.suivi]}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-4 px-6 text-sm font-bold text-slate-500 dark:text-slate-400">
                     {prospect.date}

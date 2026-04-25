@@ -5,8 +5,11 @@ import { X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
   type Lead,
+  type LeadSuivi,
   type Vehicle,
   LEAD_STATUS_LABELS,
+  LEAD_SUIVI_LABELS,
+  LEAD_SUIVI_VALUES,
   WILAYAS_58,
 } from '@/lib/types'
 import {
@@ -23,6 +26,7 @@ type EditForm = {
   model_wanted: string
   source: string
   status: Lead['status']
+  suivi: LeadSuivi | ''
   notes: string
   vehicle_id: string
 }
@@ -86,6 +90,7 @@ export function EditLeadModal({
       model_wanted: lead.model_wanted ?? '',
       source:       lead.source,
       status:       lead.status,
+      suivi:        (lead.suivi ?? '') as LeadSuivi | '',
       notes:        lead.notes ?? '',
       vehicle_id:   lead.vehicle_id ?? '',
     })
@@ -129,6 +134,7 @@ export function EditLeadModal({
       wilaya:     form.wilaya || null,
       source:     form.source,
       status:     form.status,
+      suivi:      form.suivi || null,
       notes:      form.notes.trim() || null,
       vehicle_id: linkedVehicleId,
     }
@@ -137,6 +143,14 @@ export function EditLeadModal({
     else payload.model_wanted = null
 
     let { error: err } = await supabase.from('leads').update(payload).eq('id', lead.id)
+
+    // Fallback: legacy schema (no suivi column — pre migration_07).
+    if (err && /suivi/i.test(err.message)) {
+      const { suivi: _omit, ...stripped } = payload
+      void _omit
+      const retry = await supabase.from('leads').update(stripped).eq('id', lead.id)
+      err = retry.error
+    }
 
     // Fallback: legacy schema (no model_wanted column).
     if (err && /model_wanted/i.test(err.message)) {
@@ -255,6 +269,21 @@ export function EditLeadModal({
             >
               {STATUS_OPTIONS.map((s) => (
                 <option key={s} value={s}>{LEAD_STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Suivi — independent follow-up tracker */}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Suivi</label>
+            <select
+              value={form.suivi}
+              onChange={(e) => set('suivi', e.target.value as LeadSuivi | '')}
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+            >
+              <option value="">— Aucun —</option>
+              {LEAD_SUIVI_VALUES.map((s) => (
+                <option key={s} value={s}>{LEAD_SUIVI_LABELS[s]}</option>
               ))}
             </select>
           </div>

@@ -64,8 +64,41 @@ export type Lead = {
   // fields added by migration_01_kanban.sql
   model_wanted: string | null
   budget_dzd: number | null
+  // field added by migration_07_leads_suivi.sql — independent follow-up tracker
+  suivi: LeadSuivi | null
   created_at: string
   updated_at: string
+}
+
+// ── Suivi (follow-up attempts) — distinct from sales pipeline `status` ───
+export type LeadSuivi =
+  | 'tentative_1'
+  | 'tentative_2'
+  | 'tentative_3'
+  | 'reporter'
+  | 'rdv_planifie'
+  | 'perdu'
+
+export const LEAD_SUIVI_LABELS: Record<LeadSuivi, string> = {
+  tentative_1:  'Tentative 1',
+  tentative_2:  'Tentative 2',
+  tentative_3:  'Tentative 3',
+  reporter:     'Reporter',
+  rdv_planifie: 'RDV planifié',
+  perdu:        'Perdu',
+}
+
+export const LEAD_SUIVI_VALUES: LeadSuivi[] = [
+  'tentative_1', 'tentative_2', 'tentative_3', 'reporter', 'rdv_planifie', 'perdu',
+]
+
+export const LEAD_SUIVI_BADGE_CLASSES: Record<LeadSuivi, string> = {
+  tentative_1:  'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400 border-yellow-200/60 dark:border-yellow-500/20',
+  tentative_2:  'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border-orange-200/60 dark:border-orange-500/20',
+  tentative_3:  'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400 border-red-200/60 dark:border-red-500/20',
+  reporter:     'bg-amber-200 text-amber-900 dark:bg-amber-700/30 dark:text-amber-300 border-amber-400/60 dark:border-amber-700/40',
+  rdv_planifie: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-500/20',
+  perdu:        'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200/60 dark:border-slate-700/50',
 }
 
 export type Activity = {
