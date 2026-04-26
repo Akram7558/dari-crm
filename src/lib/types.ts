@@ -70,6 +70,8 @@ export type Lead = {
   suivi: LeadSuivi | null
   // field added by migration_08_leads_rdv_date.sql — scheduled appointment time
   rdv_date: string | null
+  // field added by migration_11_leads_depot.sql — deposit paid on reservation
+  depot_amount: number | null
   created_at: string
   updated_at: string
 }

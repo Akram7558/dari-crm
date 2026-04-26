@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Search,
   Car as CarIcon,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -62,6 +63,11 @@ const BADGE_LABEL: Record<RowState, string> = {
 // manually by the user. Both are local-only (no DB action).
 type RdvAction = 'attente' | 'reserve' | 'vendu' | 'annule' | 'reporter'
 
+function formatDzd(n: number | null | undefined): string {
+  if (n == null) return ''
+  return new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 0 }).format(n)
+}
+
 const RDV_ACTION_BADGE: Record<RdvAction, string> = {
   attente:  'bg-yellow-300 text-yellow-900 border-yellow-400 dark:bg-yellow-400 dark:text-yellow-950 dark:border-yellow-500',
   reserve:  'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/30',
@@ -77,8 +83,11 @@ export function RendezVousView() {
   const [loading, setLoading]   = useState(true)
   const [migrationMissing, setMigrationMissing] = useState(false)
   // Per-row local statut (not persisted). Defaults to 'attente' on first
-  // render — "Réservé" must be set manually.
+  // render — "Réservé" must be set manually. Once a row has a depot_amount
+  // saved, we render it as 'reserve' instead of 'attente'.
   const [statutByLead, setStatutByLead] = useState<Record<string, RdvAction>>({})
+  // Pending deposit modal state — shown when user picks "Réservé".
+  const [depositModal, setDepositModal] = useState<{ lead: Lead; amount: string } | null>(null)
 
   async function fetchAll() {
     const { data, error } = await supabase
@@ -351,21 +360,51 @@ export function RendezVousView() {
                     </td>
                     <td className="py-4 px-6">
                       {(() => {
-                        const current: RdvAction = statutByLead[r.id] ?? 'attente'
+                        // If a deposit is recorded, the row is implicitly "Réservé"
+                        // unless the user has manually picked another local status.
+                        const explicit = statutByLead[r.id]
+                        const hasDeposit = r.lead.depot_amount != null
+                        const current: RdvAction = explicit ?? (hasDeposit ? 'reserve' : 'attente')
+                        const reserveLabel = (current === 'reserve' && hasDeposit)
+                          ? `Réservé · ${formatDzd(r.lead.depot_amount)} DZD`
+                          : 'Réservé'
                         return (
                           <select
                             value={current}
-                            onChange={(e) => {
-                              const action = e.target.value as RdvAction
-                              if (action === 'attente' || action === 'reserve') {
-                                // Persistent locally only — keep the choice visible.
-                                setStatutByLead((prev) => ({ ...prev, [r.id]: action }))
+                            onChange={async (e) => {
+                              const next = e.target.value as RdvAction
+                              if (next === current) return
+                              if (next === 'attente') {
+                                if (!confirm('Êtes-vous sûr de vouloir remettre ce RDV en attente ?')) return
+                                // Going back to "attente" clears any deposit recorded.
+                                if (hasDeposit) {
+                                  const { error } = await supabase
+                                    .from('leads')
+                                    .update({ depot_amount: null })
+                                    .eq('id', r.lead.id)
+                                  if (error) {
+                                    if (/depot_amount/i.test(error.message)) {
+                                      alert("La colonne 'depot_amount' n'existe pas. Exécutez supabase/migration_11_leads_depot.sql.")
+                                    } else {
+                                      alert(error.message)
+                                    }
+                                    return
+                                  }
+                                }
+                                setStatutByLead((prev) => ({ ...prev, [r.id]: 'attente' }))
+                                fetchAll()
                                 return
                               }
-                              // Action triggers a DB flow with confirm popup; the row
-                              // will disappear (annule/vendu/reporter) so we don't
-                              // need to keep the chosen value around.
-                              handleAction(r.lead, action)
+                              if (next === 'reserve') {
+                                // Open deposit modal with any existing amount pre-filled.
+                                setDepositModal({
+                                  lead:   r.lead,
+                                  amount: r.lead.depot_amount != null ? String(r.lead.depot_amount) : '',
+                                })
+                                return
+                              }
+                              // vendu / annule / reporter — existing flows.
+                              handleAction(r.lead, next)
                             }}
                             className={cn(
                               'appearance-none cursor-pointer pl-3 pr-7 py-1 rounded-full text-xs font-black uppercase tracking-widest border focus:outline-none focus:ring-2 focus:ring-indigo-500/30',
@@ -373,7 +412,7 @@ export function RendezVousView() {
                             )}
                           >
                             <option value="attente">En attente</option>
-                            <option value="reserve">Réservé</option>
+                            <option value="reserve">{reserveLabel}</option>
                             <option value="vendu">Vendu</option>
                             <option value="annule">Annulé</option>
                             <option value="reporter">Reporter</option>
@@ -424,6 +463,90 @@ export function RendezVousView() {
           )}
         </div>
       </motion.div>
+
+      {/* Deposit confirmation modal — shown when picking "Réservé" */}
+      {depositModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
+          <div className="rounded-2xl bg-card border border-border shadow-2xl w-full max-w-md flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Confirmer la réservation</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{depositModal.lead.full_name}</p>
+              </div>
+              <button
+                onClick={() => setDepositModal(null)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                const lead = depositModal.lead
+                const raw = depositModal.amount.replace(/\s/g, '')
+                const amount = raw === '' ? null : Number(raw)
+                if (amount != null && (!Number.isFinite(amount) || amount < 0)) {
+                  alert('Montant invalide.')
+                  return
+                }
+                const { error } = await supabase
+                  .from('leads')
+                  .update({ depot_amount: amount })
+                  .eq('id', lead.id)
+                if (error) {
+                  if (/depot_amount/i.test(error.message)) {
+                    alert("La colonne 'depot_amount' n'existe pas. Exécutez supabase/migration_11_leads_depot.sql.")
+                  } else {
+                    alert(error.message)
+                  }
+                  return
+                }
+                setStatutByLead((prev) => ({ ...prev, [lead.id]: 'reserve' }))
+                setDepositModal(null)
+                fetchAll()
+              }}
+              className="px-6 py-5 space-y-4"
+            >
+              <p className="text-sm text-foreground">
+                Montant du dépôt reçu de <span className="font-bold">{depositModal.lead.full_name}</span> ?
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Montant (DZD)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  autoFocus
+                  value={depositModal.amount}
+                  onChange={(e) =>
+                    setDepositModal((m) => (m ? { ...m, amount: e.target.value } : m))
+                  }
+                  placeholder="ex. 50000"
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDepositModal(null)}
+                  className="px-4 py-2 rounded-lg text-sm text-foreground hover:bg-muted transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition font-medium"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
