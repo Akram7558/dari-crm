@@ -58,8 +58,17 @@ const BADGE_LABEL: Record<RowState, string> = {
   overdue: 'En retard',
 }
 
-// Per-row action selector. "Réservé" is the default no-op.
-type RdvAction = 'reserve' | 'vendu' | 'annule' | 'reporter'
+// Per-row action selector. "En attente" is the default; "Réservé" is set
+// manually by the user. Both are local-only (no DB action).
+type RdvAction = 'attente' | 'reserve' | 'vendu' | 'annule' | 'reporter'
+
+const RDV_ACTION_BADGE: Record<RdvAction, string> = {
+  attente:  'bg-yellow-300 text-yellow-900 border-yellow-400 dark:bg-yellow-400 dark:text-yellow-950 dark:border-yellow-500',
+  reserve:  'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/30',
+  vendu:    'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30',
+  annule:   'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/30',
+  reporter: 'bg-orange-700 text-white border-orange-800 dark:bg-orange-700 dark:text-white dark:border-orange-800',
+}
 
 export function RendezVousView() {
   const [leads, setLeads]       = useState<Lead[]>([])
@@ -67,6 +76,9 @@ export function RendezVousView() {
   const [search, setSearch]     = useState('')
   const [loading, setLoading]   = useState(true)
   const [migrationMissing, setMigrationMissing] = useState(false)
+  // Per-row local statut (not persisted). Defaults to 'attente' on first
+  // render — "Réservé" must be set manually.
+  const [statutByLead, setStatutByLead] = useState<Record<string, RdvAction>>({})
 
   async function fetchAll() {
     const { data, error } = await supabase
@@ -102,7 +114,8 @@ export function RendezVousView() {
       ? [v.brand, v.model, v.year ? String(v.year) : ''].filter(Boolean).join(' ')
       : '—'
 
-    if (action === 'reserve') return // No-op default.
+    // Local-only statuses — no DB action.
+    if (action === 'attente' || action === 'reserve') return
 
     if (action === 'annule') {
       if (!confirm('Êtes-vous sûr de vouloir annuler ce RDV ? Le prospect sera supprimé définitivement.')) return
@@ -337,21 +350,36 @@ export function RendezVousView() {
                       </div>
                     </td>
                     <td className="py-4 px-6">
-                      <select
-                        defaultValue="reserve"
-                        onChange={(e) => {
-                          const action = e.target.value as RdvAction
-                          handleAction(r.lead, action)
-                          // Reset back to default so the same option can be re-selected later.
-                          e.target.value = 'reserve'
-                        }}
-                        className="appearance-none cursor-pointer pl-3 pr-7 py-1 rounded-full text-xs font-black uppercase tracking-widest border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                      >
-                        <option value="reserve">Réservé</option>
-                        <option value="vendu">Vendu</option>
-                        <option value="annule">Annulé</option>
-                        <option value="reporter">Reporter</option>
-                      </select>
+                      {(() => {
+                        const current: RdvAction = statutByLead[r.id] ?? 'attente'
+                        return (
+                          <select
+                            value={current}
+                            onChange={(e) => {
+                              const action = e.target.value as RdvAction
+                              if (action === 'attente' || action === 'reserve') {
+                                // Persistent locally only — keep the choice visible.
+                                setStatutByLead((prev) => ({ ...prev, [r.id]: action }))
+                                return
+                              }
+                              // Action triggers a DB flow with confirm popup; the row
+                              // will disappear (annule/vendu/reporter) so we don't
+                              // need to keep the chosen value around.
+                              handleAction(r.lead, action)
+                            }}
+                            className={cn(
+                              'appearance-none cursor-pointer pl-3 pr-7 py-1 rounded-full text-xs font-black uppercase tracking-widest border focus:outline-none focus:ring-2 focus:ring-indigo-500/30',
+                              RDV_ACTION_BADGE[current]
+                            )}
+                          >
+                            <option value="attente">En attente</option>
+                            <option value="reserve">Réservé</option>
+                            <option value="vendu">Vendu</option>
+                            <option value="annule">Annulé</option>
+                            <option value="reporter">Reporter</option>
+                          </select>
+                        )
+                      })()}
                     </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex items-center justify-end gap-2">
