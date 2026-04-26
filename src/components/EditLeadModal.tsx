@@ -7,7 +7,6 @@ import {
   type Lead,
   type LeadSuivi,
   type Vehicle,
-  LEAD_STATUS_LABELS,
   LEAD_SUIVI_LABELS,
   LEAD_SUIVI_VALUES,
   WILAYAS_58,
@@ -15,7 +14,6 @@ import {
 import {
   KANBAN_SOURCES,
   SOURCE_ICONS,
-  CAR_MODELS,
 } from '@/components/AddLeadModal'
 
 type EditForm = {
@@ -23,33 +21,11 @@ type EditForm = {
   phone: string
   email: string
   wilaya: string
-  model_wanted: string
   source: string
-  status: Lead['status']
   suivi: LeadSuivi | ''
   notes: string
   vehicle_id: string
-}
-
-// Statuses that require linking a specific vehicle (for accounting / reports).
-const VEHICLE_LINK_STATUSES: Lead['status'][] = ['qualified', 'proposal', 'won']
-
-// Activity title + type per linked-vehicle status. Each save with a link
-// produces a new entry — never overwriting — so we keep a full audit trail.
-function activityForStatus(
-  status: Lead['status'],
-  vehicleLabel: string
-): { type: 'meeting' | 'status_change'; title: string } | null {
-  switch (status) {
-    case 'qualified':
-      return { type: 'meeting',       title: `RDV planifié pour ${vehicleLabel}` }
-    case 'proposal':
-      return { type: 'status_change', title: `Offre faite sur ${vehicleLabel}` }
-    case 'won':
-      return { type: 'status_change', title: `Vente conclue : ${vehicleLabel}` }
-    default:
-      return null
-  }
+  rdv_date: string // datetime-local format: YYYY-MM-DDTHH:MM
 }
 
 function vehicleLabel(v: Vehicle): string {
@@ -62,9 +38,24 @@ function vehicleLabel(v: Vehicle): string {
   return head
 }
 
-const STATUS_OPTIONS: Lead['status'][] = [
-  'new', 'contacted', 'qualified', 'proposal', 'won', 'lost',
-]
+// ── datetime-local helpers ─────────────────────────────────────────
+// <input type="datetime-local"> uses "YYYY-MM-DDTHH:MM" with no tz.
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  )
+}
+function localInputToIso(local: string): string | null {
+  if (!local) return null
+  const d = new Date(local)
+  if (isNaN(d.getTime())) return null
+  return d.toISOString()
+}
 
 export function EditLeadModal({
   lead,
@@ -83,16 +74,15 @@ export function EditLeadModal({
   useEffect(() => {
     if (!lead) { setForm(null); return }
     setForm({
-      full_name:    lead.full_name ?? '',
-      phone:        lead.phone ?? '',
-      email:        lead.email ?? '',
-      wilaya:       lead.wilaya ?? '',
-      model_wanted: lead.model_wanted ?? '',
-      source:       lead.source,
-      status:       lead.status,
-      suivi:        (lead.suivi ?? '') as LeadSuivi | '',
-      notes:        lead.notes ?? '',
-      vehicle_id:   lead.vehicle_id ?? '',
+      full_name:  lead.full_name ?? '',
+      phone:      lead.phone ?? '',
+      email:      lead.email ?? '',
+      wilaya:     lead.wilaya ?? '',
+      source:     lead.source,
+      suivi:      (lead.suivi ?? '') as LeadSuivi | '',
+      notes:      lead.notes ?? '',
+      vehicle_id: lead.vehicle_id ?? '',
+      rdv_date:   isoToLocalInput(lead.rdv_date ?? null),
     })
     setError('')
   }, [lead])
@@ -118,14 +108,19 @@ export function EditLeadModal({
     if (!lead || !form) return
     if (!form.full_name.trim()) { setError('Le nom complet est requis.'); return }
 
-    const needsVehicle = VEHICLE_LINK_STATUSES.includes(form.status)
-    if (needsVehicle && !form.vehicle_id) {
-      setError('Sélectionnez le véhicule concerné par cette offre / vente.')
+    const isRdv = form.suivi === 'rdv_planifie'
+    if (isRdv && !form.vehicle_id) {
+      setError('Sélectionnez le véhicule concerné par le RDV.')
+      return
+    }
+    if (isRdv && !form.rdv_date) {
+      setError('Choisissez la date et l\u2019heure du RDV.')
       return
     }
     setSaving(true); setError('')
 
-    const linkedVehicleId = needsVehicle ? form.vehicle_id : null
+    const linkedVehicleId = isRdv ? form.vehicle_id : null
+    const rdvIso = isRdv ? localInputToIso(form.rdv_date) : null
 
     const payload: Record<string, unknown> = {
       full_name:  form.full_name.trim(),
@@ -133,17 +128,27 @@ export function EditLeadModal({
       email:      form.email.trim() || null,
       wilaya:     form.wilaya || null,
       source:     form.source,
-      status:     form.status,
       suivi:      form.suivi || null,
       notes:      form.notes.trim() || null,
       vehicle_id: linkedVehicleId,
+      rdv_date:   rdvIso,
     }
-    // Optional kanban field — only send when present so we don't fail on legacy schemas.
-    if (form.model_wanted.trim()) payload.model_wanted = form.model_wanted.trim()
-    else payload.model_wanted = null
 
     let { error: err } = await supabase.from('leads').update(payload).eq('id', lead.id)
 
+    // Fallback: legacy schema (no rdv_date column — pre migration_08).
+    if (err && /rdv_date/i.test(err.message)) {
+      const { rdv_date: _omit, ...stripped } = payload
+      void _omit
+      const retry = await supabase.from('leads').update(stripped).eq('id', lead.id)
+      err = retry.error
+      if (!err) {
+        setSaving(false)
+        setError('Lead mis à jour — exécutez migration_08_leads_rdv_date.sql pour activer la date du RDV.')
+        setTimeout(() => { onSaved(); onClose() }, 2500)
+        return
+      }
+    }
     // Fallback: legacy schema (no suivi column — pre migration_07).
     if (err && /suivi/i.test(err.message)) {
       const { suivi: _omit, ...stripped } = payload
@@ -156,14 +161,6 @@ export function EditLeadModal({
         setTimeout(() => { onSaved(); onClose() }, 2500)
         return
       }
-    }
-
-    // Fallback: legacy schema (no model_wanted column).
-    if (err && /model_wanted/i.test(err.message)) {
-      const { model_wanted: _omit, ...stripped } = payload
-      void _omit
-      const retry = await supabase.from('leads').update(stripped).eq('id', lead.id)
-      err = retry.error
     }
     // Fallback: legacy schema (no vehicle_id column — pre migration_06).
     if (err && /vehicle_id/i.test(err.message)) {
@@ -181,44 +178,30 @@ export function EditLeadModal({
 
     if (err) { setSaving(false); setError(err.message); return }
 
-    // Audit trail: when a vehicle is linked under one of the tracked statuses,
-    // log a NEW activity each time the link or the status moves. Re-saving
-    // without changing either is a no-op so we don't spam the timeline.
-    if (linkedVehicleId && needsVehicle) {
+    // Audit trail: log a new activity when an RDV is scheduled or moved.
+    if (isRdv && linkedVehicleId) {
       const linked = vehicles.find((v) => v.id === linkedVehicleId)
       if (linked) {
-        const vehicleLabel = [linked.brand, linked.model, linked.year ? String(linked.year) : '']
-          .filter(Boolean)
-          .join(' ')
-        const meta = activityForStatus(form.status, vehicleLabel)
-        const statusChanged   = lead.status !== form.status
-        const vehicleChanged  = (lead.vehicle_id ?? null) !== linkedVehicleId
-        if (meta && (statusChanged || vehicleChanged)) {
+        const label = [linked.brand, linked.model, linked.year ? String(linked.year) : '']
+          .filter(Boolean).join(' ')
+        const vehicleChanged = (lead.vehicle_id ?? null) !== linkedVehicleId
+        const rdvChanged     = (lead.rdv_date ?? null) !== rdvIso
+        const suiviChanged   = (lead.suivi ?? null) !== 'rdv_planifie'
+        if (vehicleChanged || rdvChanged || suiviChanged) {
+          const when = rdvIso
+            ? new Date(rdvIso).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })
+            : ''
           const { error: actErr } = await supabase.from('activities').insert([{
             lead_id: lead.id,
-            type:    meta.type,
-            title:   meta.title,
-            body:    `${lead.full_name} · ${vehicleLabel}`,
-            done:    true,
+            type:    'meeting',
+            title:   `RDV planifié pour ${label}`,
+            body:    `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
+            done:    false,
           }])
           if (actErr) {
             console.warn('[EditLeadModal] failed to log activity:', actErr.message)
           }
         }
-      }
-    }
-
-    // Cascade: a confirmed sale flips the linked vehicle's status to 'sold'.
-    // For 'proposal' (offre faite) and 'qualified' (RDV planifié) we keep
-    // the vehicle as-is — the dedicated reservation flow on the vehicles
-    // page handles the 'reserved' transition.
-    if (linkedVehicleId && form.status === 'won') {
-      const { error: vErr } = await supabase
-        .from('vehicles')
-        .update({ status: 'sold' })
-        .eq('id', linkedVehicleId)
-      if (vErr) {
-        console.warn('[EditLeadModal] failed to mark vehicle sold:', vErr.message)
       }
     }
 
@@ -228,6 +211,8 @@ export function EditLeadModal({
   }
 
   if (!lead || !form) return null
+
+  const isRdv = form.suivi === 'rdv_planifie'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
@@ -265,20 +250,6 @@ export function EditLeadModal({
             </div>
           </div>
 
-          {/* Status */}
-          <div>
-            <label className="block text-xs font-medium text-foreground mb-1">Statut</label>
-            <select
-              value={form.status}
-              onChange={(e) => set('status', e.target.value as Lead['status'])}
-              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{LEAD_STATUS_LABELS[s]}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Suivi — independent follow-up tracker */}
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Suivi</label>
@@ -294,27 +265,38 @@ export function EditLeadModal({
             </select>
           </div>
 
-          {/* Véhicule concerné — only for "Offre faite" / "Vendu" */}
-          {VEHICLE_LINK_STATUSES.includes(form.status) && (
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">
-                Véhicule concerné *
-              </label>
-              <select
-                value={form.vehicle_id}
-                onChange={(e) => set('vehicle_id', e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-              >
-                <option value="">— Sélectionner un véhicule —</option>
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>{vehicleLabel(v)}</option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {form.status === 'won'
-                  ? 'Le véhicule sera automatiquement marqué comme « Vendu ».'
-                  : 'Le véhicule conservera son statut actuel. Une activité sera enregistrée dans l\u2019historique.'}
-              </p>
+          {/* RDV-only fields */}
+          {isRdv && (
+            <div className="grid grid-cols-1 gap-4 rounded-xl border border-emerald-200 dark:border-emerald-700/40 bg-emerald-50/40 dark:bg-emerald-500/5 p-4">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Véhicule concerné *
+                </label>
+                <select
+                  value={form.vehicle_id}
+                  onChange={(e) => set('vehicle_id', e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+                >
+                  <option value="">— Sélectionner un véhicule —</option>
+                  {vehicles.map((v) => (
+                    <option key={v.id} value={v.id}>{vehicleLabel(v)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">
+                  Date du RDV *
+                </label>
+                <input
+                  type="datetime-local"
+                  value={form.rdv_date}
+                  onChange={(e) => set('rdv_date', e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Quand le client doit-il venir au showroom ?
+                </p>
+              </div>
             </div>
           )}
 
@@ -353,34 +335,19 @@ export function EditLeadModal({
             </div>
           </div>
 
-          {/* Vehicle + Wilaya */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Véhicule souhaité</label>
-              <input
-                list="edit-models-list"
-                value={form.model_wanted}
-                onChange={(e) => set('model_wanted', e.target.value)}
-                placeholder="ex. Geely Coolray"
-                className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-              />
-              <datalist id="edit-models-list">
-                {CAR_MODELS.map((m) => <option key={m} value={m} />)}
-              </datalist>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Wilaya</label>
-              <select
-                value={form.wilaya}
-                onChange={(e) => set('wilaya', e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-              >
-                <option value="">— Choisir —</option>
-                {WILAYAS_58.map((w, i) => (
-                  <option key={w} value={w}>{String(i + 1).padStart(2, '0')} · {w}</option>
-                ))}
-              </select>
-            </div>
+          {/* Wilaya */}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Wilaya</label>
+            <select
+              value={form.wilaya}
+              onChange={(e) => set('wilaya', e.target.value)}
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+            >
+              <option value="">— Choisir —</option>
+              {WILAYAS_58.map((w, i) => (
+                <option key={w} value={w}>{String(i + 1).padStart(2, '0')} · {w}</option>
+              ))}
+            </select>
           </div>
 
           {/* Notes */}

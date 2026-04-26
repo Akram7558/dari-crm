@@ -66,6 +66,8 @@ export type Lead = {
   budget_dzd: number | null
   // field added by migration_07_leads_suivi.sql — independent follow-up tracker
   suivi: LeadSuivi | null
+  // field added by migration_08_leads_rdv_date.sql — scheduled appointment time
+  rdv_date: string | null
   created_at: string
   updated_at: string
 }
