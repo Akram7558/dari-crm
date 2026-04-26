@@ -29,9 +29,9 @@ function formatDateFr(iso: string | null | undefined) {
 }
 
 function stockPill(status: Vehicle['status']) {
-  if (status === 'available') return { cls: 'bg-emerald-500/15 text-emerald-400', label: 'En stock' }
-  if (status === 'reserved')  return { cls: 'bg-amber-500/15 text-amber-400',   label: 'Réservé' }
-  return { cls: 'bg-red-500/15 text-red-400', label: 'Vendu' }
+  if (status === 'available') return { cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-500/20', label: 'Disponible' }
+  if (status === 'reserved')  return { cls: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border-orange-200/60 dark:border-orange-500/30', label: 'Réservé' }
+  return { cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400 border-rose-200/60 dark:border-rose-500/30', label: 'Vendu' }
 }
 
 function initialsOf(name: string) {
@@ -962,40 +962,29 @@ function VehicleCard({
           <p className="text-xs text-muted-foreground">Couleur : {v.color ?? '—'}</p>
         </div>
 
-        {v.status === 'reserved' && lead && (
+        {(v.status === 'reserved' || v.status === 'sold') && lead && (
           <div className="mt-3">
             <span
               title={lead.phone ? `${lead.full_name} · ${lead.phone}` : lead.full_name}
-              className="inline-flex items-center gap-1 bg-purple-500/15 text-purple-400 text-xs rounded-md px-2 py-1"
+              className={`inline-flex items-center gap-1 text-xs rounded-md px-2 py-1 ${
+                v.status === 'reserved'
+                  ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
+                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+              }`}
             >
               <User className="w-3 h-3" />
-              Réservé · {lead.full_name}
+              {v.status === 'reserved' ? 'Réservé' : 'Vendu'} · {lead.full_name}
             </span>
           </div>
         )}
 
         <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between gap-2">
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${stock.cls}`}>
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold border ${stock.cls}`}>
             {stock.label}
           </span>
-          <select
-            value={v.status}
-            onChange={async e => {
-              const next = e.target.value as Vehicle['status']
-              if (next === v.status) return
-              if (next === 'reserved') {
-                onStatusChangeRequest(v, next)
-              } else {
-                await onImmediateStatusChange(v, next)
-              }
-            }}
-            className="text-xs h-7 px-2 rounded-md bg-muted/40 border border-border text-muted-foreground outline-none focus:border-primary cursor-pointer"
-            aria-label="Changer le statut"
-          >
-            <option value="available">{VEHICLE_STATUS_LABELS.available}</option>
-            <option value="reserved">{VEHICLE_STATUS_LABELS.reserved}</option>
-            <option value="sold">{VEHICLE_STATUS_LABELS.sold}</option>
-          </select>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Géré par le suivi du prospect
+          </span>
         </div>
       </div>
     </div>

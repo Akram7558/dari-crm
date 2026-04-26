@@ -70,6 +70,7 @@ export function EditLeadModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
+  const [leadsById, setLeadsById] = useState<Record<string, { id: string; full_name: string }>>({})
 
   useEffect(() => {
     if (!lead) { setForm(null); return }
@@ -87,17 +88,27 @@ export function EditLeadModal({
     setError('')
   }, [lead])
 
-  // Lazy-load the vehicle list the first time the user opens the modal.
+  // Lazy-load the vehicle list and a quick lead-name index used by the
+  // "déjà réservé par X" warnings.
   useEffect(() => {
     if (!lead) return
-    if (vehicles.length > 0) return
     supabase
       .from('vehicles')
       .select('*')
       .order('created_at', { ascending: false })
       .then(({ data }) => setVehicles((data ?? []) as Vehicle[]))
+    supabase
+      .from('leads')
+      .select('id, full_name')
+      .then(({ data }) => {
+        const map: Record<string, { id: string; full_name: string }> = {}
+        for (const l of (data ?? []) as { id: string; full_name: string }[]) {
+          map[l.id] = l
+        }
+        setLeadsById(map)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lead])
+  }, [lead?.id])
 
   function set<K extends keyof EditForm>(k: K, v: EditForm[K]) {
     setForm((f) => (f ? { ...f, [k]: v } : f))
@@ -108,18 +119,44 @@ export function EditLeadModal({
     if (!lead || !form) return
     if (!form.full_name.trim()) { setError('Le nom complet est requis.'); return }
 
-    const isRdv = form.suivi === 'rdv_planifie'
-    if (isRdv && !form.vehicle_id) {
-      setError('Sélectionnez le véhicule concerné par le RDV.')
+    const isRdv      = form.suivi === 'rdv_planifie'
+    const isVendu    = form.suivi === 'vendu'
+    const needsVehicle = isRdv || isVendu
+
+    if (needsVehicle && !form.vehicle_id) {
+      setError(isRdv
+        ? 'Sélectionnez le véhicule concerné par le RDV.'
+        : 'Sélectionnez le véhicule vendu.')
       return
     }
     if (isRdv && !form.rdv_date) {
       setError('Choisissez la date et l\u2019heure du RDV.')
       return
     }
+
+    // Block double-booking. A vehicle that's already reserved or sold by
+    // another lead can never be picked here. (The dropdown also excludes
+    // these — this is a defense-in-depth check.)
+    if (needsVehicle) {
+      const target = vehicles.find((v) => v.id === form.vehicle_id)
+      if (target && (target.status === 'reserved' || target.status === 'sold')) {
+        const ownerId = target.reserved_by_lead_id
+        const blockedByOther = ownerId && ownerId !== lead.id
+        if (blockedByOther) {
+          const owner = ownerId ? leadsById[ownerId]?.full_name : null
+          setError(
+            target.status === 'reserved'
+              ? `Ce véhicule est déjà réservé${owner ? ` par ${owner}` : ''}.`
+              : `Ce véhicule a déjà été vendu${owner ? ` à ${owner}` : ''}.`
+          )
+          return
+        }
+      }
+    }
+
     setSaving(true); setError('')
 
-    const linkedVehicleId = isRdv ? form.vehicle_id : null
+    const linkedVehicleId = needsVehicle ? form.vehicle_id : null
     const rdvIso = isRdv ? localInputToIso(form.rdv_date) : null
 
     const payload: Record<string, unknown> = {
@@ -178,28 +215,64 @@ export function EditLeadModal({
 
     if (err) { setSaving(false); setError(err.message); return }
 
-    // Audit trail: log a new activity when an RDV is scheduled or moved.
-    if (isRdv && linkedVehicleId) {
+    // ── Vehicle status cascade ────────────────────────────────────
+    // Free the previously-linked vehicle if we're unlinking it or moving
+    // to a different one. We only release vehicles whose reserved_by_lead_id
+    // points at *this* lead — never touch vehicles claimed by someone else.
+    const previousVehicleId = lead.vehicle_id ?? null
+    if (previousVehicleId && previousVehicleId !== linkedVehicleId) {
+      const prev = vehicles.find((v) => v.id === previousVehicleId)
+      if (prev && prev.reserved_by_lead_id === lead.id) {
+        const { error: vErr } = await supabase
+          .from('vehicles')
+          .update({ status: 'available', reserved_by_lead_id: null })
+          .eq('id', previousVehicleId)
+        if (vErr) console.warn('[EditLeadModal] failed to free previous vehicle:', vErr.message)
+      }
+    }
+
+    // Apply the new status: rdv_planifie → reserved, vendu → sold.
+    if (linkedVehicleId) {
+      const nextStatus: 'reserved' | 'sold' | null =
+        isVendu ? 'sold' : isRdv ? 'reserved' : null
+      if (nextStatus) {
+        const { error: vErr } = await supabase
+          .from('vehicles')
+          .update({ status: nextStatus, reserved_by_lead_id: lead.id })
+          .eq('id', linkedVehicleId)
+        if (vErr) console.warn('[EditLeadModal] failed to cascade vehicle status:', vErr.message)
+      }
+    }
+
+    // Audit trail: log a new activity when an RDV / sale is scheduled or moved.
+    if (linkedVehicleId && (isRdv || isVendu)) {
       const linked = vehicles.find((v) => v.id === linkedVehicleId)
       if (linked) {
         const label = [linked.brand, linked.model, linked.year ? String(linked.year) : '']
           .filter(Boolean).join(' ')
         const vehicleChanged = (lead.vehicle_id ?? null) !== linkedVehicleId
         const rdvChanged     = (lead.rdv_date ?? null) !== rdvIso
-        const suiviChanged   = (lead.suivi ?? null) !== 'rdv_planifie'
+        const suiviChanged   = (lead.suivi ?? null) !== form.suivi
         if (vehicleChanged || rdvChanged || suiviChanged) {
-          const when = rdvIso
-            ? new Date(rdvIso).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })
-            : ''
-          const { error: actErr } = await supabase.from('activities').insert([{
-            lead_id: lead.id,
-            type:    'meeting',
-            title:   `RDV planifié pour ${label}`,
-            body:    `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
-            done:    false,
-          }])
-          if (actErr) {
-            console.warn('[EditLeadModal] failed to log activity:', actErr.message)
+          if (isRdv) {
+            const when = rdvIso
+              ? new Date(rdvIso).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })
+              : ''
+            await supabase.from('activities').insert([{
+              lead_id: lead.id,
+              type:    'meeting',
+              title:   `RDV planifié pour ${label}`,
+              body:    `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
+              done:    false,
+            }])
+          } else if (isVendu) {
+            await supabase.from('activities').insert([{
+              lead_id: lead.id,
+              type:    'status_change',
+              title:   `Vente conclue : ${label}`,
+              body:    `${lead.full_name} · ${label}`,
+              done:    true,
+            }])
           }
         }
       }
@@ -212,7 +285,8 @@ export function EditLeadModal({
 
   if (!lead || !form) return null
 
-  const isRdv = form.suivi === 'rdv_planifie'
+  const isRdv   = form.suivi === 'rdv_planifie'
+  const isVendu = form.suivi === 'vendu'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
@@ -265,40 +339,73 @@ export function EditLeadModal({
             </select>
           </div>
 
-          {/* RDV-only fields */}
-          {isRdv && (
-            <div className="grid grid-cols-1 gap-4 rounded-xl border border-emerald-200 dark:border-emerald-700/40 bg-emerald-50/40 dark:bg-emerald-500/5 p-4">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">
-                  Véhicule concerné *
-                </label>
-                <select
-                  value={form.vehicle_id}
-                  onChange={(e) => set('vehicle_id', e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-                >
-                  <option value="">— Sélectionner un véhicule —</option>
-                  {vehicles.map((v) => (
-                    <option key={v.id} value={v.id}>{vehicleLabel(v)}</option>
-                  ))}
-                </select>
+          {/* RDV / Vendu vehicle picker */}
+          {(isRdv || isVendu) && (() => {
+            // Only available vehicles can be picked, plus the one currently
+            // linked to this lead (so re-saving doesn't break).
+            const selectableVehicles = vehicles.filter((v) =>
+              v.status === 'available' || v.id === lead.vehicle_id
+            )
+            const picked = vehicles.find((v) => v.id === form.vehicle_id) ?? null
+            const blockedByOther =
+              picked &&
+              (picked.status === 'reserved' || picked.status === 'sold') &&
+              picked.reserved_by_lead_id &&
+              picked.reserved_by_lead_id !== lead.id
+            const blockerName = blockedByOther && picked.reserved_by_lead_id
+              ? leadsById[picked.reserved_by_lead_id]?.full_name ?? null
+              : null
+            const wrapColor = isVendu
+              ? 'border-rose-200 dark:border-rose-700/40 bg-rose-50/40 dark:bg-rose-500/5'
+              : 'border-emerald-200 dark:border-emerald-700/40 bg-emerald-50/40 dark:bg-emerald-500/5'
+            return (
+              <div className={`grid grid-cols-1 gap-4 rounded-xl border p-4 ${wrapColor}`}>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    Véhicule concerné *
+                  </label>
+                  <select
+                    value={form.vehicle_id}
+                    onChange={(e) => set('vehicle_id', e.target.value)}
+                    className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+                  >
+                    <option value="">— Sélectionner un véhicule —</option>
+                    {selectableVehicles.map((v) => (
+                      <option key={v.id} value={v.id}>{vehicleLabel(v)}</option>
+                    ))}
+                  </select>
+                  {blockedByOther && picked && (
+                    <p className="mt-1.5 text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                      {picked.status === 'reserved'
+                        ? `Ce véhicule est déjà réservé${blockerName ? ` par ${blockerName}` : ''}.`
+                        : `Ce véhicule a déjà été vendu${blockerName ? ` à ${blockerName}` : ''}.`}
+                    </p>
+                  )}
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {isVendu
+                      ? 'Le véhicule sera automatiquement marqué « Vendu ».'
+                      : 'Le véhicule sera automatiquement marqué « Réservé ».'}
+                  </p>
+                </div>
+                {isRdv && (
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      Date du RDV *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={form.rdv_date}
+                      onChange={(e) => set('rdv_date', e.target.value)}
+                      className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Quand le client doit-il venir au showroom ?
+                    </p>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">
-                  Date du RDV *
-                </label>
-                <input
-                  type="datetime-local"
-                  value={form.rdv_date}
-                  onChange={(e) => set('rdv_date', e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 transition"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Quand le client doit-il venir au showroom ?
-                </p>
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Name */}
           <div>

@@ -142,14 +142,29 @@ export function ProspectsView() {
   }, [menuOpenId, contactPopover])
 
   async function updateSuivi(id: string, suivi: LeadSuivi | null) {
+    const previous = leads.find((l) => l.id === id)
     // Optimistic update so the badge color flips immediately.
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, suivi } : l)))
 
-    // Special case: "RDV planifié" needs a vehicle + date — open the edit
-    // modal pre-set so the user can fill those in straight away.
-    if (suivi === 'rdv_planifie') {
-      const target = leads.find((l) => l.id === id)
-      if (target) setEditingLead({ ...target, suivi: 'rdv_planifie' })
+    // Special case: "RDV planifié" / "Vendu" need a vehicle picked — open the
+    // edit modal pre-set so the user lands directly on the vehicle picker.
+    if (suivi === 'rdv_planifie' || suivi === 'vendu') {
+      if (previous) setEditingLead({ ...previous, suivi })
+    } else {
+      // Moving away from rdv/vendu: release the vehicle this lead was holding
+      // so it goes back to "Disponible". Only release if this lead actually
+      // owned the reservation.
+      if (previous?.vehicle_id) {
+        const veh = vehiclesById[previous.vehicle_id]
+        if (veh && veh.reserved_by_lead_id === id &&
+            (veh.status === 'reserved' || veh.status === 'sold')) {
+          await supabase
+            .from('vehicles')
+            .update({ status: 'available', reserved_by_lead_id: null })
+            .eq('id', previous.vehicle_id)
+          fetchVehicles()
+        }
+      }
     }
 
     const { error: err } = await supabase
@@ -170,8 +185,21 @@ export function ProspectsView() {
 
   async function deleteLead(id: string) {
     if (!confirm('Supprimer ce prospect ? Cette action est irréversible.')) return
+    // Release any vehicle this lead was holding before we delete the lead row.
+    const target = leads.find((l) => l.id === id)
+    if (target?.vehicle_id) {
+      const veh = vehiclesById[target.vehicle_id]
+      if (veh && veh.reserved_by_lead_id === id &&
+          (veh.status === 'reserved' || veh.status === 'sold')) {
+        await supabase
+          .from('vehicles')
+          .update({ status: 'available', reserved_by_lead_id: null })
+          .eq('id', target.vehicle_id)
+      }
+    }
     setLeads((prev) => prev.filter((l) => l.id !== id))
     await supabase.from('leads').delete().eq('id', id)
+    fetchVehicles()
   }
 
   function exportCsv() {
