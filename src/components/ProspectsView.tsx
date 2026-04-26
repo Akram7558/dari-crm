@@ -86,12 +86,14 @@ const statusStyles = {
   'Contacté': 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border-emerald-200/50 dark:border-emerald-500/20',
 }
 
-const PAGE_SIZE = 6
+const PAGE_SIZE_OPTIONS = [15, 30, 50, 80, 150] as const
+const DEFAULT_PAGE_SIZE = 15
 
 export function ProspectsView() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [addOpen, setAddOpen] = useState(false)
   const [suiviFilter, setSuiviFilter] = useState<'all' | LeadSuivi>('all')
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -142,6 +144,14 @@ export function ProspectsView() {
   async function updateSuivi(id: string, suivi: LeadSuivi | null) {
     // Optimistic update so the badge color flips immediately.
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, suivi } : l)))
+
+    // Special case: "RDV planifié" needs a vehicle + date — open the edit
+    // modal pre-set so the user can fill those in straight away.
+    if (suivi === 'rdv_planifie') {
+      const target = leads.find((l) => l.id === id)
+      if (target) setEditingLead({ ...target, suivi: 'rdv_planifie' })
+    }
+
     const { error: err } = await supabase
       .from('leads')
       .update({ suivi })
@@ -230,12 +240,12 @@ export function ProspectsView() {
   }, [leads, search, suiviFilter, vehiclesById])
 
   const total = prospectsData.length
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const safePage = Math.min(page, totalPages)
-  const startIdx = (safePage - 1) * PAGE_SIZE
-  const pageRows = prospectsData.slice(startIdx, startIdx + PAGE_SIZE)
+  const startIdx = (safePage - 1) * pageSize
+  const pageRows = prospectsData.slice(startIdx, startIdx + pageSize)
   const fromLabel = total === 0 ? 0 : startIdx + 1
-  const toLabel = Math.min(startIdx + PAGE_SIZE, total)
+  const toLabel = Math.min(startIdx + pageSize, total)
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
@@ -578,24 +588,38 @@ export function ProspectsView() {
           <span className="text-xs font-bold text-slate-500">
             Affichage de {fromLabel} à {toLabel} sur {total}
           </span>
-          <div className="flex gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={safePage === 1}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-            >
-              Précédent
-            </button>
-            <button className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200 dark:border-slate-700">
-              {safePage}
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage === totalPages}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-            >
-              Suivant
-            </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}
+                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <span className="text-xs font-bold text-slate-500">éléments</span>
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+              >
+                Précédent
+              </button>
+              <button className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200 dark:border-slate-700">
+                {safePage}
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+              >
+                Suivant
+              </button>
+            </div>
           </div>
         </div>
       </motion.div>
