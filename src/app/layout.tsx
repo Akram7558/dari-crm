@@ -33,7 +33,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <meta name="facebook-domain-verification" content="0s8G6lzua3e16t40fb89245b2c7khj" />
+        <meta name="facebook-domain-verification" content="K0sj47yiz1pmqoezq4iqzi0n0q5w2" />
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
       </head>
       <body className="h-full">
