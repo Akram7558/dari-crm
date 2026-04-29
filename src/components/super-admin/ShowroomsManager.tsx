@@ -6,12 +6,14 @@ import { Plus, Pencil, Trash2, Power, X, Building2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import type { Showroom } from '@/lib/types'
+import { WILAYAS_58 } from '@/lib/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 
 type Form = {
   id: string | null
   name: string
+  city: string
   owner_email: string
   module_vente: boolean
   module_location: boolean
@@ -21,6 +23,7 @@ type Form = {
 const empty: Form = {
   id: null,
   name: '',
+  city: '',
   owner_email: '',
   module_vente: true,
   module_location: false,
@@ -50,9 +53,11 @@ export function ShowroomsManager() {
     e.preventDefault()
     if (!form) return
     if (!form.name.trim()) { setError('Nom requis.'); return }
+    if (!form.city)        { setError('Wilaya requise.'); return }
     setSaving(true); setError('')
     const payload = {
       name: form.name.trim(),
+      city: form.city,
       owner_email: form.owner_email.trim() || null,
       module_vente: form.module_vente,
       module_location: form.module_location,
@@ -115,6 +120,7 @@ export function ShowroomsManager() {
           <thead>
             <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40">
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Nom</th>
+              <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Wilaya</th>
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Propriétaire</th>
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Modules</th>
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Statut</th>
@@ -126,6 +132,7 @@ export function ShowroomsManager() {
             {rows.map((s) => (
               <tr key={s.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20">
                 <td className="px-6 py-4 text-sm font-bold text-zinc-900 dark:text-white">{s.name}</td>
+                <td className="px-6 py-4 text-sm text-zinc-700 dark:text-zinc-300">{s.city ?? '—'}</td>
                 <td className="px-6 py-4 text-xs text-zinc-500 dark:text-zinc-400">{s.owner_email ?? '—'}</td>
                 <td className="px-6 py-4">
                   <div className="flex flex-wrap gap-1">
@@ -167,6 +174,7 @@ export function ShowroomsManager() {
                       onClick={() => setForm({
                         id: s.id,
                         name: s.name,
+                        city: s.city ?? '',
                         owner_email: s.owner_email ?? '',
                         module_vente: !!s.module_vente,
                         module_location: !!s.module_location,
@@ -220,6 +228,22 @@ export function ShowroomsManager() {
                   className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Wilaya *</label>
+                <select
+                  value={form.city}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  <option value="">— Choisir —</option>
+                  {WILAYAS_58.map((w, i) => (
+                    <option key={w} value={w}>
+                      {String(i + 1).padStart(2, '0')} · {w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Email du propriétaire</label>
                 <input
