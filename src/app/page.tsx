@@ -1,17 +1,29 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Car, Loader2 } from 'lucide-react'
+import { Car, Loader2, CheckCircle2 } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resetSuccess, setResetSuccess] = useState(false)
+
+  // Show success banner after the password-reset flow redirects here.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('reset') === 'success') {
+      setResetSuccess(true)
+      // Clean the URL so a refresh doesn't keep the banner forever.
+      window.history.replaceState({}, '', '/')
+    }
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -59,6 +71,13 @@ export default function LoginPage() {
       {/* Card */}
       <div className="w-full max-w-sm bg-white/5 border border-white/10 rounded-2xl p-8 backdrop-blur-sm">
         <h2 className="text-white text-lg font-medium mb-6">Connexion</h2>
+
+        {resetSuccess && (
+          <div className="mb-5 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300">
+            <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>Mot de passe mis à jour. Vous pouvez maintenant vous connecter.</span>
+          </div>
+        )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">
