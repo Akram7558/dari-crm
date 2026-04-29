@@ -18,6 +18,9 @@ import {
   Plug,
   Menu,
   X,
+  Building2,
+  ScrollText,
+  Shield,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -35,16 +38,26 @@ const navItems = [
   { href: '/dashboard/alerts',      label: 'Alertes',         icon: BellRing },
 ]
 
+// Sidebar shown when the signed-in user has role = 'super_admin'.
+const superAdminNavItems = [
+  { href: '/dashboard/super-admin',              label: 'Tableau de bord', icon: Shield },
+  { href: '/dashboard/super-admin/showrooms',    label: 'Showrooms',       icon: Building2 },
+  { href: '/dashboard/super-admin/utilisateurs', label: 'Utilisateurs',    icon: Users },
+  { href: '/dashboard/super-admin/logs',         label: 'Logs',            icon: ScrollText },
+  { href: '/dashboard/super-admin/parametres',   label: 'Paramètres',      icon: Settings },
+]
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router   = useRouter()
   const [userName, setUserName] = useState('Utilisateur')
   const [userInitial, setUserInitial] = useState('U')
   const [userId, setUserId] = useState<string | null>(null)
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!data?.user) {
         router.push('/')
         return
@@ -55,8 +68,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setUserName(display)
       setUserInitial(display.charAt(0).toUpperCase())
       setUserId(data.user.id)
+
+      // Look up role to decide which sidebar to render. Falls back
+      // gracefully if user_roles isn't migrated yet.
+      const { data: roleRow } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', data.user.id)
+        .maybeSingle()
+      setIsSuperAdmin(roleRow?.role === 'super_admin')
     })
   }, [router])
+
+  const activeNavItems = isSuperAdmin ? superAdminNavItems : navItems
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -72,7 +96,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Derive page title from current path for the header.
   const pageTitle = (() => {
-    const match = navItems.find((it) =>
+    // Order matters: longest prefix first (sub-routes before /dashboard).
+    const all = [...activeNavItems].sort((a, b) => b.href.length - a.href.length)
+    const match = all.find((it) =>
       it.href === pathname ||
       (it.href !== '/dashboard' && pathname.startsWith(it.href))
     )
@@ -117,11 +143,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Navigation */}
       <nav className="flex-1 px-4 pt-2 pb-2 space-y-2 overflow-y-auto">
-        {navItems.map((item) => {
-          const Icon     = item.icon
-          const isActive =
-            pathname === item.href ||
-            (item.href !== '/dashboard' && pathname.startsWith(item.href))
+        {activeNavItems.map((item) => {
+          const Icon = item.icon
+          // Roots (/dashboard, /dashboard/super-admin) match exactly so
+          // their child routes don't keep highlighting the parent. All
+          // other items match either exactly or as a sub-path.
+          const isRoot = item.href === '/dashboard' || item.href === '/dashboard/super-admin'
+          const isActive = isRoot
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(item.href + '/')
           return (
             <Link
               key={item.href}
