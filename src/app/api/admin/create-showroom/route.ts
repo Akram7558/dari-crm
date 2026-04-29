@@ -20,17 +20,64 @@ import { createClient } from '@supabase/supabase-js'
 
 export const runtime = 'nodejs' // service-role key requires Node, not Edge
 
-// 12-char password with mixed letters + digits, avoiding ambiguous chars (0/O/1/l).
-function generateTempPassword(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
-  // Crypto-grade randomness in Node's runtime.
-  const buf = new Uint8Array(12)
-  crypto.getRandomValues(buf)
-  let out = ''
-  for (let i = 0; i < buf.length; i++) {
-    out += alphabet[buf[i] % alphabet.length]
+// Send the welcome email via Resend. Returns true on success, false on
+// any failure (the caller decides whether to surface the failure).
+async function sendWelcomeEmail(owner_email: string, password: string): Promise<{ ok: boolean; error?: string }> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return { ok: false, error: 'RESEND_API_KEY missing' }
+
+  // Plain-text body. Kept simple to avoid an HTML template — admins can
+  // upgrade to HTML later if desired.
+  const text =
+`Bonjour,
+
+Votre compte AutoDex CRM a été créé avec succès.
+
+Voici vos identifiants de connexion :
+Email : ${owner_email}
+Mot de passe : ${password}
+
+Connectez-vous ici : https://www.autodex.store
+
+Pour des raisons de sécurité, nous vous recommandons de changer votre mot de passe après votre première connexion.
+
+Pour toute question, contactez-nous à : support@autodex.store
+
+L'équipe AutoDex`
+
+  const html = `<p>Bonjour,</p>
+<p>Votre compte AutoDex CRM a été créé avec succès.</p>
+<p><strong>Voici vos identifiants de connexion :</strong><br/>
+Email : <code>${owner_email}</code><br/>
+Mot de passe : <code>${password}</code></p>
+<p>Connectez-vous ici : <a href="https://www.autodex.store">https://www.autodex.store</a></p>
+<p>Pour des raisons de sécurité, nous vous recommandons de changer votre mot de passe après votre première connexion.</p>
+<p>Pour toute question, contactez-nous à : <a href="mailto:support@autodex.store">support@autodex.store</a></p>
+<p>— L'équipe AutoDex</p>`
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        from:    process.env.RESEND_FROM ?? 'AutoDex <noreply@autodex.store>',
+        to:      [owner_email],
+        subject: 'Bienvenue sur AutoDex — Vos identifiants de connexion',
+        text,
+        html,
+      }),
+    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      return { ok: false, error: `Resend ${res.status}: ${errText.slice(0, 200)}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'unknown' }
   }
-  return out
 }
 
 export async function POST(req: NextRequest) {
@@ -39,6 +86,7 @@ export async function POST(req: NextRequest) {
     const name        = String(body.name        ?? '').trim()
     const city        = String(body.city        ?? '').trim()
     const owner_email = String(body.owner_email ?? '').trim().toLowerCase()
+    const password    = String(body.password    ?? '')
     const module_vente    = body.module_vente    !== false   // default true
     const module_location = body.module_location === true    // default false
     const active          = body.active          !== false   // default true
@@ -46,6 +94,9 @@ export async function POST(req: NextRequest) {
     if (!name)        return NextResponse.json({ error: 'Nom requis.' },          { status: 400 })
     if (!city)        return NextResponse.json({ error: 'Wilaya requise.' },      { status: 400 })
     if (!owner_email) return NextResponse.json({ error: 'Email propriétaire requis.' }, { status: 400 })
+    if (!password || password.length < 8) {
+      return NextResponse.json({ error: 'Mot de passe (≥ 8 caractères) requis.' }, { status: 400 })
+    }
 
     // ── Verify caller is super_admin ────────────────────────────────
     const supabaseAuth = createServerClient(
@@ -88,11 +139,10 @@ export async function POST(req: NextRequest) {
       { auth: { autoRefreshToken: false, persistSession: false } },
     )
 
-    // 1. Create auth user.
-    const tempPassword = generateTempPassword()
+    // 1. Create auth user with the password supplied by the super admin.
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email:         owner_email,
-      password:      tempPassword,
+      password,
       email_confirm: true,
     })
     if (createErr || !created.user) {
@@ -140,11 +190,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: urErr.message }, { status: 400 })
     }
 
+    // 4. Send the welcome email with the credentials. We do this AFTER the
+    //    rows are persisted so a transient email failure doesn't abort the
+    //    whole flow — the client decides whether to surface the password
+    //    for manual delivery instead.
+    const mail = await sendWelcomeEmail(owner_email, password)
+
     return NextResponse.json({
-      ok:            true,
-      showroom_id:   shroom.id,
+      ok:           true,
+      showroom_id:  shroom.id,
       owner_email,
-      temp_password: tempPassword,
+      email_sent:   mail.ok,
+      email_error:  mail.ok ? undefined : mail.error,
+      // Only echoed back when email failed, so the super admin can deliver
+      // credentials manually. NEVER returned on success.
+      temp_password: mail.ok ? undefined : password,
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Erreur serveur.'

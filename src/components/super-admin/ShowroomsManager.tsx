@@ -15,6 +15,8 @@ type Form = {
   name: string
   city: string
   owner_email: string
+  password: string
+  password_confirm: string
   module_vente: boolean
   module_location: boolean
   active: boolean
@@ -25,9 +27,32 @@ const empty: Form = {
   name: '',
   city: '',
   owner_email: '',
+  password: '',
+  password_confirm: '',
   module_vente: true,
   module_location: false,
   active: true,
+}
+
+// Returns 0 (none/weak), 1 (weak), 2 (medium), 3 (strong) for the password.
+function passwordStrength(pw: string): 0 | 1 | 2 | 3 {
+  if (!pw) return 0
+  let score = 0
+  if (pw.length >= 8)  score++
+  if (pw.length >= 12) score++
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++
+  if (/\d/.test(pw))   score++
+  if (/[^A-Za-z0-9]/.test(pw)) score++
+  if (score <= 2) return 1
+  if (score <= 4) return 2
+  return 3
+}
+
+const STRENGTH_META: Record<0 | 1 | 2 | 3, { label: string; color: string; widthClass: string }> = {
+  0: { label: '—',      color: 'bg-zinc-300 dark:bg-zinc-700',  widthClass: 'w-0' },
+  1: { label: 'Faible', color: 'bg-rose-500',                    widthClass: 'w-1/3' },
+  2: { label: 'Moyen',  color: 'bg-amber-500',                   widthClass: 'w-2/3' },
+  3: { label: 'Fort',   color: 'bg-emerald-500',                 widthClass: 'w-full' },
 }
 
 export function ShowroomsManager() {
@@ -36,9 +61,15 @@ export function ShowroomsManager() {
   const [form, setForm] = useState<Form | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  // Success modal — shown after the API returns the temp password.
-  const [created, setCreated] = useState<{ email: string; password: string } | null>(null)
-  const [copied, setCopied]   = useState(false)
+  // Success modal — shown after the API responds. When email_sent is true
+  // we show a simple "email envoyé" confirmation. When false, we surface
+  // the password so the super admin can deliver it manually.
+  const [created, setCreated] = useState<
+    | { email: string; emailSent: true }
+    | { email: string; emailSent: false; password: string; emailError?: string }
+    | null
+  >(null)
+  const [copied, setCopied] = useState(false)
 
   async function fetchAll() {
     const { data, error } = await supabase
@@ -83,6 +114,16 @@ export function ShowroomsManager() {
       setError('Email du propriétaire requis pour créer un compte.')
       return
     }
+    if (form.password.length < 8) {
+      setSaving(false)
+      setError('Le mot de passe doit contenir au moins 8 caractères.')
+      return
+    }
+    if (form.password !== form.password_confirm) {
+      setSaving(false)
+      setError('Les deux mots de passe ne correspondent pas.')
+      return
+    }
     const res = await fetch('/api/admin/create-showroom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,6 +131,7 @@ export function ShowroomsManager() {
         name:            form.name.trim(),
         city:            form.city,
         owner_email:     form.owner_email.trim().toLowerCase(),
+        password:        form.password,
         module_vente:    form.module_vente,
         module_location: form.module_location,
         active:          form.active,
@@ -102,13 +144,22 @@ export function ShowroomsManager() {
       return
     }
     setForm(null)
-    setCreated({ email: json.owner_email, password: json.temp_password })
+    if (json.email_sent) {
+      setCreated({ email: json.owner_email, emailSent: true })
+    } else {
+      setCreated({
+        email:       json.owner_email,
+        emailSent:   false,
+        password:    json.temp_password ?? form.password,
+        emailError:  json.email_error,
+      })
+    }
     fetchAll()
   }
 
   async function copyCredentials() {
-    if (!created) return
-    const text = `Email : ${created.email}\nMot de passe temporaire : ${created.password}`
+    if (!created || created.emailSent) return
+    const text = `Email : ${created.email}\nMot de passe : ${created.password}`
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -223,6 +274,8 @@ export function ShowroomsManager() {
                         name: s.name,
                         city: s.city ?? '',
                         owner_email: s.owner_email ?? '',
+                        password: '',
+                        password_confirm: '',
                         module_vente: !!s.module_vente,
                         module_location: !!s.module_location,
                         active: !!s.active,
@@ -305,10 +358,64 @@ export function ShowroomsManager() {
                 />
                 {!form.id && (
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    Un compte sera créé automatiquement avec un mot de passe temporaire.
+                    Un compte sera créé automatiquement et un email de bienvenue sera envoyé.
                   </p>
                 )}
               </div>
+
+              {!form.id && (() => {
+                const strength = passwordStrength(form.password)
+                const meta = STRENGTH_META[strength]
+                const mismatch = form.password_confirm.length > 0 && form.password !== form.password_confirm
+                return (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Mot de passe *</label>
+                      <input
+                        type="password"
+                        value={form.password}
+                        onChange={(e) => setForm({ ...form, password: e.target.value })}
+                        minLength={8}
+                        autoComplete="new-password"
+                        placeholder="8 caractères minimum"
+                        required
+                        className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                          <div
+                            className={cn('h-full transition-all duration-200', meta.color, meta.widthClass)}
+                          />
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground w-12 text-right">
+                          {meta.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Confirmer le mot de passe *</label>
+                      <input
+                        type="password"
+                        value={form.password_confirm}
+                        onChange={(e) => setForm({ ...form, password_confirm: e.target.value })}
+                        minLength={8}
+                        autoComplete="new-password"
+                        required
+                        className={cn(
+                          'w-full h-10 px-3 rounded-lg border bg-background text-foreground text-sm outline-none focus:ring-2 transition',
+                          mismatch
+                            ? 'border-rose-400 focus:border-rose-400 focus:ring-rose-500/20'
+                            : 'border-border focus:border-indigo-400 focus:ring-indigo-500/20'
+                        )}
+                      />
+                      {mismatch && (
+                        <p className="mt-1 text-[11px] text-rose-600">Les deux mots de passe ne correspondent pas.</p>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
 
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-foreground">Modules activés</label>
@@ -381,64 +488,86 @@ export function ShowroomsManager() {
               </button>
             </div>
 
-            <div className="px-6 py-5 space-y-4">
-              <div className="space-y-1">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Email du propriétaire
+            {created.emailSent ? (
+              // ── Happy path: email delivered ─────────────────────
+              <div className="px-6 py-6 space-y-4">
+                <p className="text-sm text-foreground">
+                  Un email avec les identifiants a été envoyé à{' '}
+                  <span className="font-bold break-all">{created.email}</span>.
                 </p>
-                <p className="text-sm font-mono text-foreground bg-muted rounded-lg px-3 py-2 break-all select-all">
-                  {created.email}
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Le propriétaire peut maintenant se connecter sur{' '}
+                  <a href="https://www.autodex.store" className="text-indigo-600 dark:text-indigo-400 hover:underline">
+                    autodex.store
+                  </a>{' '}
+                  et changer son mot de passe depuis ses paramètres.
                 </p>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setCreated(null); setCopied(false) }}
+                    className="px-5 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+                  >
+                    Fermer
+                  </button>
+                </div>
               </div>
+            ) : (
+              // ── Email failed: show credentials so admin can deliver manually
+              <div className="px-6 py-5 space-y-4">
+                <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
+                  <p className="text-xs font-bold text-amber-700 dark:text-amber-300">
+                    ⚠️ Showroom créé mais l&apos;email n&apos;a pas pu être envoyé.
+                  </p>
+                  <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-1">
+                    Identifiants à transmettre manuellement :
+                  </p>
+                </div>
 
-              <div className="space-y-1">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Mot de passe temporaire
-                </p>
-                <p className="text-sm font-mono text-foreground bg-muted rounded-lg px-3 py-2 break-all select-all">
-                  {created.password}
-                </p>
-              </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Email</p>
+                  <p className="text-sm font-mono text-foreground bg-muted rounded-lg px-3 py-2 break-all select-all">
+                    {created.email}
+                  </p>
+                </div>
 
-              <button
-                type="button"
-                onClick={copyCredentials}
-                className={cn(
-                  'flex items-center justify-center gap-2 w-full h-10 rounded-lg text-sm font-medium transition-colors',
-                  copied
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                )}
-              >
-                {copied ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    Copié
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    Copier les identifiants
-                  </>
-                )}
-              </button>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Mot de passe</p>
+                  <p className="text-sm font-mono text-foreground bg-muted rounded-lg px-3 py-2 break-all select-all">
+                    {created.password}
+                  </p>
+                </div>
 
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Envoyez ces identifiants au propriétaire. Il pourra changer son
-                mot de passe après connexion. Ce mot de passe ne sera plus
-                affiché — copiez-le maintenant.
-              </p>
-
-              <div className="flex justify-end pt-2">
                 <button
                   type="button"
-                  onClick={() => { setCreated(null); setCopied(false) }}
-                  className="px-5 py-2 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 text-foreground hover:bg-zinc-200 dark:hover:bg-zinc-700 font-medium"
+                  onClick={copyCredentials}
+                  className={cn(
+                    'flex items-center justify-center gap-2 w-full h-10 rounded-lg text-sm font-medium transition-colors',
+                    copied
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  )}
                 >
-                  Fermer
+                  {copied ? (<><CheckCircle2 className="w-4 h-4" /> Copié</>) : (<><Copy className="w-4 h-4" /> Copier les identifiants</>)}
                 </button>
+
+                {created.emailError && (
+                  <p className="text-[10px] text-muted-foreground break-all">
+                    Détail : {created.emailError}
+                  </p>
+                )}
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setCreated(null); setCopied(false) }}
+                    className="px-5 py-2 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 text-foreground hover:bg-zinc-200 dark:hover:bg-zinc-700 font-medium"
+                  >
+                    Fermer
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
