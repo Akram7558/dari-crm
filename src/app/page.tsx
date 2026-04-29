@@ -30,31 +30,58 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error) {
-      setError(error.message)
+    if (error || !data?.user) {
+      setError(error?.message ?? 'Connexion échouée.')
       setLoading(false)
-    } else {
-      window.location.href = '/dashboard'
+      return
     }
+
+    await routeAfterLogin(data.user.id)
   }
 
   async function handleDemoLogin() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: 'demo@autodex.store',
       password: 'demo123',
     })
 
-    if (error) {
+    if (error || !data?.user) {
       setError("Connexion démo indisponible pour l'instant.")
       setLoading(false)
-    } else {
-      window.location.href = '/dashboard'
+      return
     }
+
+    await routeAfterLogin(data.user.id)
+  }
+
+  // Role-based redirect after login. Uses a hard nav (`window.location.href`)
+  // so the browser fully reloads and the middleware sees the new session
+  // cookie set by `signInWithPassword`. A `router.push()` would only do a
+  // soft navigation, which sometimes fires before the cookie round-trip
+  // finishes and traps the user back on the login page.
+  async function routeAfterLogin(userId: string) {
+    const { data: roleRow } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    let target = '/dashboard'
+    switch (roleRow?.role) {
+      case 'super_admin': target = '/dashboard/super-admin'; break
+      case 'closer':      target = '/dashboard/rendez-vous'; break
+      case 'prospecteur': target = '/dashboard/leads';       break
+      // owner / manager / unknown → '/dashboard'
+    }
+
+    // Hard reload: the SSR cookie was just set by signInWithPassword and the
+    // middleware needs a fresh request to see it.
+    window.location.href = target
   }
 
   return (

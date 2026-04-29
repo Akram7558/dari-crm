@@ -10,12 +10,13 @@
 // ─────────────────────────────────────────────────────────────────────
 
 import { NextResponse, type NextRequest } from 'next/server'
-import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import type { AppRole } from '@/lib/types'
 
+// Set to true to enable verbose middleware logging in Vercel runtime logs.
+const DEBUG = true
+
 // ── Inline ACL (mirrors src/lib/auth.ts) ─────────────────────────────
-// We duplicate the ACL here because the middleware runs on the Edge
-// runtime and importing the supabase client module pulls extra deps.
 const ROUTE_ACL: Array<{ prefix: string; allow: AppRole[] }> = [
   { prefix: '/dashboard/super-admin',           allow: ['super_admin'] },
   { prefix: '/dashboard/parametres',            allow: ['super_admin', 'owner', 'manager'] },
@@ -61,52 +62,70 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => req.cookies.getAll().map(({ name, value }) => ({ name, value })),
-        setAll: (cookiesToSet) => {
+        getAll() {
+          return req.cookies.getAll().map(({ name, value }) => ({ name, value }))
+        },
+        setAll(cookiesToSet) {
+          // Mirror cookies onto BOTH the request (so subsequent reads in
+          // this middleware see fresh values) and the response (so the
+          // browser persists them).
           for (const { name, value, options } of cookiesToSet) {
+            req.cookies.set(name, value)
             res.cookies.set({ name, value, ...options })
           }
         },
       },
     },
   )
+
   const { data: { user } } = await supabase.auth.getUser()
+
+  if (DEBUG) {
+    console.log('[mw]', pathname, '· user:', user?.id ?? 'none', '· email:', user?.email ?? 'none')
+  }
 
   // 1. Not signed in → bounce to landing.
   if (!user) {
     const url = req.nextUrl.clone()
     url.pathname = '/'
     url.searchParams.set('redirect', pathname)
+    if (DEBUG) console.log('[mw] redirect → / (no session)')
     return NextResponse.redirect(url)
   }
 
   // 2. Look up the role.
-  const { data: roleRow } = await supabase
+  const { data: roleRow, error: roleErr } = await supabase
     .from('user_roles')
     .select('role')
     .eq('user_id', user.id)
     .maybeSingle()
 
-  // No role provisioned → also bounce to landing. The owner/super_admin
-  // is responsible for assigning a role before the user can enter.
+  if (DEBUG) {
+    console.log('[mw] role lookup:', roleRow?.role ?? 'none', '· err:', roleErr?.message ?? 'none')
+  }
+
+  // No role provisioned → bounce to landing.
   if (!roleRow) {
     const url = req.nextUrl.clone()
     url.pathname = '/'
     url.searchParams.set('error', 'no_role')
+    if (DEBUG) console.log('[mw] redirect → / (no role row)')
     return NextResponse.redirect(url)
   }
 
   const role = roleRow.role as AppRole
 
-  // 3. Route ACL. If the user isn't allowed here, send them to the
-  //    default dashboard for their role.
+  // 3. Route ACL.
   if (!isRoleAllowed(pathname, role)) {
+    const target = defaultDashboardForRole(role)
+    if (DEBUG) console.log('[mw] redirect →', target, `(role=${role} not allowed at ${pathname})`)
     const url = req.nextUrl.clone()
-    url.pathname = defaultDashboardForRole(role)
+    url.pathname = target
     url.search = ''
     return NextResponse.redirect(url)
   }
 
+  if (DEBUG) console.log('[mw] allow', pathname, `(role=${role})`)
   return res
 }
 
