@@ -178,12 +178,13 @@ export async function processIncomingMessage(args: ProcessMessageArgs): Promise<
 
   // Log a system activity so the lead timeline shows the origin message
   await sb.from('activities').insert([{
-    lead_id:   ins.data.id,
-    user_id:   assignee?.id ?? null,
-    type:      'note',
-    title:     `Message entrant — ${platform}`,
-    body:      text,
-    done:      true,
+    showroom_id: assignee?.showroom_id ?? null,
+    lead_id:     ins.data.id,
+    user_id:     assignee?.id ?? null,
+    type:        'note',
+    title:       `Message entrant — ${platform}`,
+    body:        text,
+    done:        true,
   }])
 
   return { ok: true, leadId: ins.data.id, created: true, extracted }

@@ -49,6 +49,35 @@ export async function getCurrentUserRole(): Promise<CurrentUserRole> {
 }
 
 /**
+ * Resolve the showroom_id of the currently signed-in user.
+ *
+ * Used by client-side INSERT paths to stamp `showroom_id` on every new
+ * row going into a tenant table (leads, vehicles, ventes, activities,
+ * notifications). RLS will reject the insert if the value doesn't match
+ * the user's own showroom — this helper just keeps us from sending a
+ * doomed request in the first place.
+ *
+ * Returns:
+ *   - the user's showroom_id when they have a role row with one
+ *   - null when not signed in, when no role is provisioned, or when the
+ *     user is super_admin (no tenant binding)
+ */
+export async function getCurrentShowroomId(): Promise<string | null> {
+  const { data: auth } = await supabase.auth.getUser()
+  const user = auth?.user
+  if (!user) return null
+
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('showroom_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return (data.showroom_id as string | null) ?? null
+}
+
+/**
  * Default landing dashboard for a given role. Used by the middleware to
  * route users to the right UI after login and to redirect away from
  * pages they're not allowed to see.

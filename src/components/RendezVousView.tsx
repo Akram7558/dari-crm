@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
+import { getCurrentShowroomId } from '@/lib/auth'
 import type { Lead, Vehicle } from '@/lib/types'
 import { format, isPast, isToday } from 'date-fns'
 import { fr } from 'date-fns/locale'
@@ -177,7 +178,9 @@ export function RendezVousView() {
         .eq('id', lead.id)
       if (lErr) { alert(lErr.message); return }
       // 3. Insert into ventes ledger.
+      const showroomId = await getCurrentShowroomId()
       const { error: vErr } = await supabase.from('ventes').insert([{
+        showroom_id:       showroomId,
         lead_id:           lead.id,
         vehicle_id:        v?.id ?? null,
         client_name:       lead.full_name,
@@ -194,11 +197,12 @@ export function RendezVousView() {
       }
       // 4. Audit trail.
       await supabase.from('activities').insert([{
-        lead_id: lead.id,
-        type:    'status_change',
-        title:   `Vente conclue : ${vehicleName}`,
-        body:    `${lead.full_name} · ${vehicleName}`,
-        done:    true,
+        showroom_id: showroomId,
+        lead_id:     lead.id,
+        type:        'status_change',
+        title:       `Vente conclue : ${vehicleName}`,
+        body:        `${lead.full_name} · ${vehicleName}`,
+        done:        true,
       }])
       fetchAll()
       return

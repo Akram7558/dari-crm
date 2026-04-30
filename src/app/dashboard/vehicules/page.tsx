@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getCurrentShowroomId } from '@/lib/auth'
 import { VEHICLE_STATUS_LABELS, type Vehicle } from '@/lib/types'
 import { ALGERIA_BRANDS, MODELS_BY_BRAND, YEARS, type Brand } from '@/lib/vehicle-catalog'
 import { generateUniqueVehicleReference } from '@/lib/vehicle-reference'
@@ -178,6 +179,14 @@ function AddVehicleModal({
         err = retry.error
       }
     } else {
+      // Multi-tenant: stamp showroom_id on every new vehicle.
+      const showroomId = await getCurrentShowroomId()
+      if (!showroomId) {
+        setSaving(false)
+        setError("Aucun showroom associé à votre compte. Contactez l'administrateur.")
+        return
+      }
+      payload.showroom_id = showroomId
       payload.reserved_by_lead_id = null
       // Auto-generate the reference on every new vehicle.
       payload.reference = await generateUniqueVehicleReference(
@@ -1151,12 +1160,14 @@ export default function VehiculesPage() {
     // Do NOT auto-change the lead's status — let the user handle it.
     if (wasReserved && previousLeadId) {
       const vehicleLabel = `${v.brand} ${v.model}${v.year ? ` ${v.year}` : ''}`.trim()
+      const showroomId = await getCurrentShowroomId()
       const { error: actErr } = await supabase.from('activities').insert([{
-        lead_id: previousLeadId,
-        type:    'status_change',
-        title:   'Réservation annulée',
-        body:    `Réservation annulée pour ${vehicleLabel}`,
-        done:    true,
+        showroom_id: showroomId,
+        lead_id:     previousLeadId,
+        type:        'status_change',
+        title:       'Réservation annulée',
+        body:        `Réservation annulée pour ${vehicleLabel}`,
+        done:        true,
       }])
       if (actErr) {
         console.warn('[vehicules] failed to log un-reservation activity:', actErr.message)
@@ -1203,12 +1214,14 @@ export default function VehiculesPage() {
       console.warn('[vehicules] failed to update lead status to proposal:', leadErr.message)
     }
 
+    const showroomId = await getCurrentShowroomId()
     const { error: actErr } = await supabase.from('activities').insert([{
-      lead_id: lead.id,
-      type:    'status_change',
-      title:   'Véhicule réservé',
-      body:    `${vehicleLabel} réservé pour ce client`,
-      done:    true,
+      showroom_id: showroomId,
+      lead_id:     lead.id,
+      type:        'status_change',
+      title:       'Véhicule réservé',
+      body:        `${vehicleLabel} réservé pour ce client`,
+      done:        true,
     }])
     if (actErr) {
       console.warn('[vehicules] failed to log reservation activity:', actErr.message)

@@ -16,6 +16,7 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '@/lib/supabase'
+import { getCurrentShowroomId } from '@/lib/auth'
 import {
   type Lead, type Vehicle, type Activity,
   LEAD_STATUS_LABELS, LEAD_SOURCE_LABELS, WILAYAS_58,
@@ -447,10 +448,11 @@ function LeadSidePanel({ lead, onClose, onLeadUpdated }: {
     if (error) { setPanelStatus(lead.status); return }
 
     supabase.from('activities').insert([{
-      lead_id: lead.id,
-      type: 'status_change',
-      title: `Statut → ${LEAD_STATUS_LABELS[newStatus]}`,
-      done: true,
+      showroom_id: lead.showroom_id,
+      lead_id:     lead.id,
+      type:        'status_change',
+      title:       `Statut → ${LEAD_STATUS_LABELS[newStatus]}`,
+      done:        true,
     }]).then(() => refreshActivities())
 
     onLeadUpdated({ ...lead, status: newStatus })
@@ -482,10 +484,11 @@ function LeadSidePanel({ lead, onClose, onLeadUpdated }: {
   async function addQuickActivity(type: Exclude<QuickActivityType, 'note'>) {
     setAddingAct(true)
     await supabase.from('activities').insert([{
-      lead_id: lead.id,
+      showroom_id: lead.showroom_id,
+      lead_id:     lead.id,
       type,
-      title: QUICK_TITLE[type],           // Fix #8: no 'note' key lookup
-      done: type !== 'meeting',
+      title:       QUICK_TITLE[type],     // Fix #8: no 'note' key lookup
+      done:        type !== 'meeting',
     }])
     setAddingAct(false)
     refreshActivities()
@@ -495,11 +498,12 @@ function LeadSidePanel({ lead, onClose, onLeadUpdated }: {
     if (!quickNote.trim()) return
     setAddingAct(true)
     await supabase.from('activities').insert([{
-      lead_id: lead.id,
-      type: 'note',
-      title: 'Note interne',
-      body: quickNote.trim(),
-      done: true,
+      showroom_id: lead.showroom_id,
+      lead_id:     lead.id,
+      type:        'note',
+      title:       'Note interne',
+      body:        quickNote.trim(),
+      done:        true,
     }])
     setQuickNote('')
     setAddingAct(false)
@@ -816,12 +820,16 @@ export default function ProspectsPage() {
       return
     }
 
-    // Log activity — fire-and-forget (non-critical)
+    // Log activity — fire-and-forget (non-critical). Pull showroom_id from
+    // the lead being moved so RLS accepts the insert.
+    const movedLead = leads.find(l => l.id === leadId)
+    const showroomId = movedLead?.showroom_id ?? (await getCurrentShowroomId())
     supabase.from('activities').insert([{
-      lead_id: leadId,
-      type: 'status_change',
-      title: `Statut → ${LEAD_STATUS_LABELS[newStatus]}`,
-      done: true,
+      showroom_id: showroomId,
+      lead_id:     leadId,
+      type:        'status_change',
+      title:       `Statut → ${LEAD_STATUS_LABELS[newStatus]}`,
+      done:        true,
     }])
   }
 

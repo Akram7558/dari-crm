@@ -268,19 +268,21 @@ export function EditLeadModal({
               ? new Date(rdvIso).toLocaleString('fr-DZ', { dateStyle: 'short', timeStyle: 'short' })
               : ''
             await supabase.from('activities').insert([{
-              lead_id: lead.id,
-              type:    'meeting',
-              title:   `RDV planifié pour ${label}`,
-              body:    `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
-              done:    false,
+              showroom_id: lead.showroom_id,
+              lead_id:     lead.id,
+              type:        'meeting',
+              title:       `RDV planifié pour ${label}`,
+              body:        `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
+              done:        false,
             }])
           } else if (isVendu) {
             await supabase.from('activities').insert([{
-              lead_id: lead.id,
-              type:    'status_change',
-              title:   `Vente conclue : ${label}`,
-              body:    `${lead.full_name} · ${label}`,
-              done:    true,
+              showroom_id: lead.showroom_id,
+              lead_id:     lead.id,
+              type:        'status_change',
+              title:       `Vente conclue : ${label}`,
+              body:        `${lead.full_name} · ${label}`,
+              done:        true,
             }])
           }
         }

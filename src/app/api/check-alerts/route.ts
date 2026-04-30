@@ -138,16 +138,26 @@ export async function POST(req: Request) {
       .eq('user_id', userId)
       .gte('created_at', dayStart)
     if (!r3.error && (r3.count ?? 0) === 0) {
-      toInsert.push({
-        showroom_id: null,
-        user_id: userId,
-        type: 'vendor_inactive',
-        title: 'Aucune activité aujourd’hui',
-        message: 'Vous n’avez encore rien enregistré aujourd’hui — pensez à logger vos appels.',
-        lead_id: null,
-        vehicle_id: null,
-        dedupe_key: `vendor_inactive:${userId}:${dayBucket(now)}`,
-      })
+      // notifications.showroom_id is NOT NULL after migration_14 — resolve
+      // it via the user's role row before queueing the alert.
+      const ur = await sb
+        .from('user_roles')
+        .select('showroom_id')
+        .eq('user_id', userId)
+        .maybeSingle()
+      const userShowroom = (ur.data?.showroom_id as string | null) ?? null
+      if (userShowroom) {
+        toInsert.push({
+          showroom_id: userShowroom,
+          user_id: userId,
+          type: 'vendor_inactive',
+          title: 'Aucune activité aujourd’hui',
+          message: 'Vous n’avez encore rien enregistré aujourd’hui — pensez à logger vos appels.',
+          lead_id: null,
+          vehicle_id: null,
+          dedupe_key: `vendor_inactive:${userId}:${dayBucket(now)}`,
+        })
+      }
     }
   }
 
@@ -200,11 +210,14 @@ export async function POST(req: Request) {
   }
 
   // ── Insert with ON CONFLICT DO NOTHING on dedupe_key ──────
+  // Drop any row missing showroom_id — notifications.showroom_id is now
+  // NOT NULL (migration_14) and we'd rather skip than abort the batch.
+  const safeInserts = toInsert.filter(n => n.showroom_id)
   let created = 0
-  if (toInsert.length) {
+  if (safeInserts.length) {
     const { data, error } = await sb
       .from('notifications')
-      .upsert(toInsert, { onConflict: 'dedupe_key', ignoreDuplicates: true })
+      .upsert(safeInserts, { onConflict: 'dedupe_key', ignoreDuplicates: true })
       .select('id')
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -214,7 +227,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    checked: toInsert.length,
+    checked: safeInserts.length,
     created,
     rules: { r1: r1.data?.length ?? 0, r2: r2.data?.length ?? 0 },
   })

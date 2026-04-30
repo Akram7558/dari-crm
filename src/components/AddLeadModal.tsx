@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { getCurrentShowroomId } from '@/lib/auth'
 import { WILAYAS_58 } from '@/lib/types'
 
 export const SOURCE_ICONS: Record<string, string> = {
@@ -50,6 +51,15 @@ export function AddLeadModal({ open, onClose, onSaved }: {
     if (!form.full_name.trim()) { setError('Le nom complet est requis.'); return }
     setSaving(true); setError('')
 
+    // Multi-tenant: stamp the lead with the current user's showroom_id.
+    // RLS will reject the insert if this is missing or wrong.
+    const showroomId = await getCurrentShowroomId()
+    if (!showroomId) {
+      setSaving(false)
+      setError("Aucun showroom associé à votre compte. Contactez l'administrateur.")
+      return
+    }
+
     const LEGACY_SOURCE: Record<string, string> = {
       facebook:  'social',
       instagram: 'social',
@@ -59,12 +69,13 @@ export function AddLeadModal({ open, onClose, onSaved }: {
     }
 
     const basePayload: Record<string, unknown> = {
-      full_name: form.full_name.trim(),
-      phone:     form.phone  || null,
-      wilaya:    form.wilaya || null,
-      source:    form.source,
-      status:    'new',
-      notes:     form.notes  || null,
+      showroom_id: showroomId,
+      full_name:   form.full_name.trim(),
+      phone:       form.phone  || null,
+      wilaya:      form.wilaya || null,
+      source:      form.source,
+      status:      'new',
+      notes:       form.notes  || null,
     }
     if (form.model_wanted.trim()) basePayload.model_wanted = form.model_wanted.trim()
     if (form.budget_dzd.trim()) {
