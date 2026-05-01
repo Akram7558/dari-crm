@@ -69,6 +69,24 @@ export async function requireUser(req: NextRequest): Promise<AuthContext> {
   return { user, authSb }
 }
 
+/**
+ * Like `requireUser`, but additionally verifies the caller's role is
+ * `super_admin`. Throws 401 / 403 on failure.
+ */
+export async function requireSuperAdmin(req: NextRequest): Promise<AuthContext> {
+  const ctx = await requireUser(req)
+  const { data: roleRow, error } = await ctx.authSb
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', ctx.user.id)
+    .maybeSingle()
+  if (error) throw new ApiError(500, error.message)
+  if (roleRow?.role !== 'super_admin') {
+    throw new ApiError(403, 'Accès refusé.')
+  }
+  return ctx
+}
+
 export type ShowroomContext = AuthContext & {
   role: string
   /**
