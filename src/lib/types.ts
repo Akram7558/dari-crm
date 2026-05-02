@@ -74,6 +74,9 @@ export type Vehicle = {
   type_moteur: string | null
   // field added by migration_09_vehicles_reference.sql — auto-generated code
   reference: string | null
+  // field added by migration_20_ventes_rls_motorisation.sql — engine designation
+  // (e.g. "1.0 TCe", "1.5 TSi", "2.0 TDi"). Free-form text, optional.
+  motorisation: string | null
 }
 
 export type LeadSource =

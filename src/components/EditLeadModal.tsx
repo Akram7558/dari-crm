@@ -93,11 +93,21 @@ export function EditLeadModal({
   // "déjà réservé par X" warnings.
   useEffect(() => {
     if (!lead) return
-    supabase
+    // Server-side filter: never load `reserved` / `sold` vehicles into
+    // the picker — except for the one currently linked to this lead, so
+    // re-saving with no change doesn't break. Defense-in-depth: the
+    // client also filters in `selectableVehicles` below.
+    let q = supabase
       .from('vehicles')
       .select('*')
       .order('created_at', { ascending: false })
-      .then(({ data }) => setVehicles((data ?? []) as Vehicle[]))
+    if (lead.vehicle_id) {
+      // PostgREST `or()` syntax: status.eq.available,id.eq.<uuid>
+      q = q.or(`status.eq.available,id.eq.${lead.vehicle_id}`)
+    } else {
+      q = q.eq('status', 'available')
+    }
+    q.then(({ data }) => setVehicles((data ?? []) as Vehicle[]))
     supabase
       .from('leads')
       .select('id, full_name')

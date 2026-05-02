@@ -53,6 +53,7 @@ function isMissingColumnError(err: unknown): boolean {
     msg.includes('finition') ||
     msg.includes('carte_grise') ||
     msg.includes('type_moteur') ||
+    msg.includes('motorisation') ||
     msg.includes('reference') ||
     (msg.includes('column') && msg.includes('does not exist'))
   )
@@ -64,6 +65,7 @@ const VEHICLE_DETAIL_KEYS = [
   'finition',
   'carte_grise',
   'type_moteur',
+  'motorisation',
 ] as const
 
 function stripVehicleDetailKeys(p: Record<string, unknown>) {
@@ -101,6 +103,7 @@ function AddVehicleModal({
         finition: initial.finition ?? '',
         carte_grise: initial.carte_grise ?? '',
         type_moteur: initial.type_moteur ?? 'Essence',
+        motorisation: initial.motorisation ?? '',
       }
     }
     // Empty defaults — user must pick or add a brand/model.
@@ -116,6 +119,7 @@ function AddVehicleModal({
       finition: '',
       carte_grise: '',
       type_moteur: 'Essence',
+      motorisation: '',
     }
   }
 
@@ -168,6 +172,7 @@ function AddVehicleModal({
       finition:         form.finition.trim() || null,
       carte_grise:      form.carte_grise.trim() || null,
       type_moteur:      form.type_moteur || null,
+      motorisation:     form.motorisation.trim() || null,
     }
 
     let err: { message: string } | null = null
@@ -226,6 +231,7 @@ function AddVehicleModal({
         finition: '',
         carte_grise: '',
         type_moteur: 'Essence',
+        motorisation: '',
       })
       setCustomBrandMode(false)
       setCustomModelMode(false)
@@ -399,12 +405,22 @@ function AddVehicleModal({
                 <option value="Électrique">Électrique</option>
               </select>
             </div>
-            <div className="col-span-2">
+            <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">État de la carrosserie</label>
               <input
                 value={form.etat_carrosserie}
                 onChange={e => setForm(f => ({ ...f, etat_carrosserie: e.target.value }))}
                 placeholder="ex. Excellent, Rayures légères"
+                className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Motorisation</label>
+              <input
+                value={form.motorisation}
+                onChange={e => setForm(f => ({ ...f, motorisation: e.target.value }))}
+                placeholder="ex. 1.0 TCe, 1.5 TSi, 2.0 TDi"
+                maxLength={50}
                 className="w-full h-9 px-3 rounded-lg bg-card border border-border text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
               />
             </div>
@@ -621,6 +637,7 @@ function VehicleDetailsModal({
             <DetailField label="Type du moteur" value={vehicle.type_moteur ?? '—'} />
             <DetailField label="Finition" value={vehicle.finition ?? '—'} />
             <DetailField label="État de la carrosserie" value={vehicle.etat_carrosserie ?? '—'} />
+            <DetailField label="Motorisation" value={vehicle.motorisation ?? '—'} />
             <DetailField label="Carte grise" value={vehicle.carte_grise ?? '—'} />
             <div>
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Statut</p>
