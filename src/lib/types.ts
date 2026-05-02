@@ -318,6 +318,20 @@ export type SaasDistributionPreview = {
   percentage: number | null
 }
 
+// ── SaaS prospect distribution (migration_19) ────────────────────────
+export type SaasProspectDistributionEntry = {
+  id: string
+  user_id: string
+  email: string | null
+  percentage: number
+  active: boolean
+  last_assigned_at: string | null
+  prospect_count_total: number
+  prospect_count_30days: number
+}
+
+export type SaasProspectDistributionPreview = SaasDistributionPreview
+
 export type SaasActivity = {
   id: string
   prospect_id: string | null

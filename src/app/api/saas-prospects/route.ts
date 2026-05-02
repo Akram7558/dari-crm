@@ -102,13 +102,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Suivi invalide.' }, { status: 400 })
     }
 
-    // Authorization on assigned_to: prospecteur_saas can only assign to themselves.
-    let finalAssignedTo: string | null = assigned_to
+    // ── Resolve assigned_to ─────────────────────────────────────────
+    // Rules:
+    //   prospecteur_saas      → always self (body ignored)
+    //   super_admin/commercial:
+    //     - 'auto' or empty   → server picks via saas_pick_next_prospecteur()
+    //     - explicit user_id  → use as-is (server trusts the choice for
+    //                            internal team; it can be any auth user)
+    let finalAssignedTo: string | null
     if (ctx.role === 'prospecteur_saas') {
-      if (assigned_to && assigned_to !== ctx.user.id) {
-        return NextResponse.json({ error: 'Vous ne pouvez vous assigner que vous-même.' }, { status: 403 })
-      }
       finalAssignedTo = ctx.user.id
+    } else if (!assigned_to || assigned_to === 'auto') {
+      const { data: pickedId, error: pickErr } = await ctx.authSb.rpc('saas_pick_next_prospecteur')
+      if (pickErr) return NextResponse.json({ error: pickErr.message }, { status: 500 })
+      finalAssignedTo = (pickedId as string | null) ?? null
+    } else {
+      finalAssignedTo = assigned_to
     }
 
     const payload = {

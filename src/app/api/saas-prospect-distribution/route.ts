@@ -1,13 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────
-// /api/saas-distribution
-//   GET  — read distribution table (super_admin + commercial)
+// /api/saas-prospect-distribution
+//   GET  — read (all 3 internal roles)
 //   PUT  — upsert entries (super_admin only)
+//
+// Mirrors /api/saas-distribution but targets prospecteur_saas users
+// and counts super_admin_prospects.assigned_to instead of RDVs.
 // ─────────────────────────────────────────────────────────────────────
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
-  requireInternalUser, requireSuperAdmin, ApiError, errorResponse,
+  requireInternalUser, requireSuperAdmin, errorResponse,
 } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
@@ -15,49 +18,38 @@ export const runtime = 'nodejs'
 const PERCENT_TOLERANCE = 0.01
 const DAY_MS = 24 * 60 * 60 * 1000
 
-function ensureSuperOrCommercial(role: string) {
-  if (role !== 'super_admin' && role !== 'commercial') {
-    throw new ApiError(403, 'Accès refusé.')
-  }
-}
-
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) throw new ApiError(500, 'Service role key missing.')
+  if (!url || !key) throw new Error('Service role key missing.')
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
 }
 
 // ── GET ─────────────────────────────────────────────────────────────
-// Returns distribution rows enriched with auth.users emails + RDV counts,
-// plus the list of all `commercial` users so the UI can offer adding any
-// commercial that's missing from the table.
 export async function GET(req: NextRequest) {
   try {
-    const ctx = await requireInternalUser(req)
-    ensureSuperOrCommercial(ctx.role)
-
+    await requireInternalUser(req)
     const admin = adminClient()
 
     // 1. Distribution rows.
     const { data: rows, error: rErr } = await admin
-      .from('saas_rdv_distribution')
+      .from('saas_prospect_distribution')
       .select('*')
       .order('percentage', { ascending: false })
     if (rErr) return NextResponse.json({ error: rErr.message }, { status: 500 })
 
-    // 2. All commercials (for "add to distribution" dropdown).
-    const { data: commercials, error: cErr } = await admin
+    // 2. All prospecteur_saas users (showroom_id is null for internal roles).
+    const { data: roles, error: rolesErr } = await admin
       .from('user_roles')
       .select('user_id')
-      .eq('role', 'commercial')
+      .eq('role', 'prospecteur_saas')
       .is('showroom_id', null)
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 })
+    if (rolesErr) return NextResponse.json({ error: rolesErr.message }, { status: 500 })
 
-    // 3. Resolve auth emails (admin API, paginated).
+    // 3. Resolve emails (admin API, paginated).
     const wantedIds = new Set<string>([
-      ...(rows ?? []).map(r => r.user_id as string),
-      ...(commercials ?? []).map(c => c.user_id as string),
+      ...(rows  ?? []).map(r => r.user_id as string),
+      ...(roles ?? []).map(r => r.user_id as string),
     ])
     const emailById = new Map<string, string | null>()
     for (let page = 1; page <= 5 && emailById.size < wantedIds.size; page++) {
@@ -67,11 +59,11 @@ export async function GET(req: NextRequest) {
       if (data.users.length < 200) break
     }
 
-    // 4. RDV counts per assignee (total + last 30 days).
+    // 4. Prospect counts per assignee (total + last 30 days).
     const since30 = new Date(Date.now() - 30 * DAY_MS).toISOString()
     const [{ data: totalRows }, { data: recentRows }] = await Promise.all([
-      admin.from('super_admin_rdv').select('assigned_to').not('assigned_to', 'is', null),
-      admin.from('super_admin_rdv').select('assigned_to').not('assigned_to', 'is', null).gte('created_at', since30),
+      admin.from('super_admin_prospects').select('assigned_to').not('assigned_to', 'is', null),
+      admin.from('super_admin_prospects').select('assigned_to').not('assigned_to', 'is', null).gte('created_at', since30),
     ])
     const totalByUser  = new Map<string, number>()
     const recentByUser = new Map<string, number>()
@@ -83,30 +75,28 @@ export async function GET(req: NextRequest) {
     }
 
     const entries = (rows ?? []).map(r => ({
-      id:                r.id,
-      user_id:           r.user_id,
-      email:             emailById.get(r.user_id as string) ?? null,
-      percentage:        Number(r.percentage),
-      active:            !!r.active,
-      last_assigned_at:  r.last_assigned_at,
-      rdv_count_total:   totalByUser.get(r.user_id  as string) ?? 0,
-      rdv_count_30days:  recentByUser.get(r.user_id as string) ?? 0,
+      id:                     r.id,
+      user_id:                r.user_id,
+      email:                  emailById.get(r.user_id as string) ?? null,
+      percentage:             Number(r.percentage),
+      active:                 !!r.active,
+      last_assigned_at:       r.last_assigned_at,
+      prospect_count_total:   totalByUser.get(r.user_id  as string) ?? 0,
+      prospect_count_30days:  recentByUser.get(r.user_id as string) ?? 0,
     }))
 
     const knownIds = new Set(entries.map(e => e.user_id))
-    const availableCommercials = (commercials ?? [])
-      .map(c => ({
-        user_id: c.user_id as string,
-        email:   emailById.get(c.user_id as string) ?? null,
+    const availableUsers = (roles ?? [])
+      .map(r => ({
+        user_id: r.user_id as string,
+        email:   emailById.get(r.user_id as string) ?? null,
       }))
-      .filter(c => !knownIds.has(c.user_id))
+      .filter(u => !knownIds.has(u.user_id))
 
     return NextResponse.json({
       entries,
-      // `available_users` is the generic key consumed by DistributionManager.
-      // `available_commercials` kept for backward-compat with any other caller.
-      available_users:       availableCommercials,
-      available_commercials: availableCommercials,
+      // Generic key the shared DistributionManager component reads.
+      available_users: availableUsers,
     })
   } catch (err) {
     return errorResponse(err)
@@ -114,9 +104,6 @@ export async function GET(req: NextRequest) {
 }
 
 // ── PUT ─────────────────────────────────────────────────────────────
-// Body: { entries: [{ user_id, percentage, active }] }
-// Upserts each entry — never deletes (use DELETE /[user_id] for that).
-// Validates the sum of active percentages == 100.
 export async function PUT(req: NextRequest) {
   try {
     await requireSuperAdmin(req)
@@ -144,7 +131,6 @@ export async function PUT(req: NextRequest) {
       cleaned.push({ user_id, percentage, active })
     }
 
-    // Sum-of-active check.
     const activeTotal = cleaned
       .filter(e => e.active)
       .reduce((acc, e) => acc + e.percentage, 0)
@@ -155,7 +141,7 @@ export async function PUT(req: NextRequest) {
       )
     }
 
-    // Verify each user_id is actually a commercial.
+    // Verify each user_id is a prospecteur_saas (internal — no showroom).
     const admin = adminClient()
     const ids = cleaned.map(e => e.user_id)
     const { data: roles, error: rErr } = await admin
@@ -165,21 +151,20 @@ export async function PUT(req: NextRequest) {
     if (rErr) return NextResponse.json({ error: rErr.message }, { status: 500 })
     const validIds = new Set(
       (roles ?? [])
-        .filter(r => r.role === 'commercial' && !r.showroom_id)
+        .filter(r => r.role === 'prospecteur_saas' && !r.showroom_id)
         .map(r => r.user_id as string),
     )
     for (const e of cleaned) {
       if (!validIds.has(e.user_id)) {
         return NextResponse.json(
-          { error: `${e.user_id} n'est pas un commercial.` },
+          { error: `${e.user_id} n'est pas un prospecteur SaaS.` },
           { status: 400 },
         )
       }
     }
 
-    // Upsert.
     const { data, error } = await admin
-      .from('saas_rdv_distribution')
+      .from('saas_prospect_distribution')
       .upsert(
         cleaned.map(e => ({
           user_id:    e.user_id,

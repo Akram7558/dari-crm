@@ -14,7 +14,29 @@ export default function SuperAdminSettingsPage() {
         </p>
       </div>
 
-      <DistributionManager />
+      <DistributionManager
+        title="Distribution des RDV SaaS"
+        description="Configurez la répartition automatique des nouveaux RDV SaaS entre les commerciaux. La somme des pourcentages actifs doit être égale à 100%."
+        apiBase="/api/saas-distribution"
+        countLabel="RDV reçus"
+        lastLabel="Dernier RDV"
+        roleNoun="commercial"
+        roleAdd="commercial"
+        countTotalKey="rdv_count_total"
+        count30dKey="rdv_count_30days"
+      />
+
+      <DistributionManager
+        title="Distribution des Prospects SaaS"
+        description="Configurez la répartition automatique des nouveaux prospects entre les prospecteurs. La somme des pourcentages actifs doit être égale à 100%."
+        apiBase="/api/saas-prospect-distribution"
+        countLabel="Prospects reçus"
+        lastLabel="Dernier prospect"
+        roleNoun="prospecteur"
+        roleAdd="prospecteur"
+        countTotalKey="prospect_count_total"
+        count30dKey="prospect_count_30days"
+      />
     </div>
   )
 }

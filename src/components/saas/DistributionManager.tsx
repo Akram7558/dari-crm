@@ -7,14 +7,69 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import type { AppRole, SaasDistributionEntry } from '@/lib/types'
+import type { AppRole } from '@/lib/types'
 
 const PERCENT_TOLERANCE = 0.01
 
+// ── Generic shape ────────────────────────────────────────────────────
+// Both the RDV-distribution and prospect-distribution endpoints return
+// rows with the same core fields plus a pair of count fields whose names
+// differ (`rdv_count_*` vs `prospect_count_*`). We normalise into one
+// internal shape inside the component.
+type GenericEntry = {
+  id: string
+  user_id: string
+  email: string | null
+  percentage: number
+  active: boolean
+  last_assigned_at: string | null
+  count_total: number
+  count_30days: number
+}
+
 type Available = { user_id: string; email: string | null }
 
-export function DistributionManager() {
-  const [entries, setEntries]   = useState<SaasDistributionEntry[]>([])
+export type DistributionManagerProps = {
+  /** Section title shown in the card header. */
+  title:        string
+  /** Helper text under the title. */
+  description:  string
+  /** Base path for GET / PUT — `/api/saas-distribution` or `/api/saas-prospect-distribution`. */
+  apiBase:      string
+  /** Column header for the count cell ("RDV reçus" / "Prospects reçus"). */
+  countLabel:   string
+  /** Column header for the last-assigned cell ("Dernier RDV" / "Dernier prospect"). */
+  lastLabel:    string
+  /** Used in empty-state and add-button copy: "Aucun commercial / prospecteur dans la distribution". */
+  roleNoun:     string
+  /** Singular noun used in confirms / dropdown placeholder ("commercial" / "prospecteur"). */
+  roleAdd:      string
+  /**
+   * Names of the count fields on the server response. Defaults to the
+   * RDV variants — pass the prospect variants for the prospect endpoint.
+   */
+  countTotalKey?:  string   // default 'rdv_count_total'
+  count30dKey?:    string   // default 'rdv_count_30days'
+}
+
+type ServerRow = Record<string, unknown> & {
+  id: string
+  user_id: string
+  email: string | null
+  percentage: number | string
+  active: boolean
+  last_assigned_at: string | null
+}
+
+export function DistributionManager(props: DistributionManagerProps) {
+  const {
+    title, description, apiBase,
+    countLabel, lastLabel, roleNoun, roleAdd,
+    countTotalKey = 'rdv_count_total',
+    count30dKey   = 'rdv_count_30days',
+  } = props
+
+  const [entries, setEntries]   = useState<GenericEntry[]>([])
   const [available, setAvailable] = useState<Available[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -24,9 +79,22 @@ export function DistributionManager() {
   const [toast, setToast]       = useState<string | null>(null)
   function flashToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500) }
 
+  function rowToEntry(r: ServerRow): GenericEntry {
+    return {
+      id:               String(r.id),
+      user_id:          String(r.user_id),
+      email:            (r.email as string | null) ?? null,
+      percentage:       Number(r.percentage),
+      active:           !!r.active,
+      last_assigned_at: (r.last_assigned_at as string | null) ?? null,
+      count_total:      Number(r[countTotalKey] ?? 0),
+      count_30days:     Number(r[count30dKey]   ?? 0),
+    }
+  }
+
   async function fetchAll() {
     setLoading(true); setError('')
-    const res = await fetch('/api/saas-distribution')
+    const res = await fetch(apiBase)
     const json = await res.json().catch(() => ({}))
     setLoading(false)
     if (!res.ok) {
@@ -34,8 +102,12 @@ export function DistributionManager() {
       setEntries([]); setAvailable([])
       return
     }
-    setEntries((json.entries ?? []) as SaasDistributionEntry[])
-    setAvailable((json.available_commercials ?? []) as Available[])
+    const rows = (json.entries ?? []) as ServerRow[]
+    setEntries(rows.map(rowToEntry))
+    // Both endpoints expose `available_users`; the older one also exposes
+    // `available_commercials` for backward compat.
+    const av = (json.available_users ?? json.available_commercials ?? []) as Available[]
+    setAvailable(av)
   }
 
   useEffect(() => {
@@ -46,7 +118,8 @@ export function DistributionManager() {
         .from('user_roles').select('role').eq('user_id', data.user.id).maybeSingle()
       setRole((r?.role as AppRole | null) ?? null)
     })
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase])
 
   const canEdit = role === 'super_admin'
 
@@ -56,7 +129,7 @@ export function DistributionManager() {
   )
   const totalIs100 = Math.abs(total - 100) <= PERCENT_TOLERANCE
 
-  function patchLocal(userId: string, patch: Partial<SaasDistributionEntry>) {
+  function patchLocal(userId: string, patch: Partial<GenericEntry>) {
     setEntries((cur) => cur.map(e => e.user_id === userId ? { ...e, ...patch } : e))
   }
 
@@ -67,7 +140,7 @@ export function DistributionManager() {
       return
     }
     setSaving(true)
-    const res = await fetch('/api/saas-distribution', {
+    const res = await fetch(apiBase, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -85,18 +158,12 @@ export function DistributionManager() {
     fetchAll()
   }
 
-  // ── Add a commercial to the LOCAL list only ────────────────────────
-  // Persistence happens on Save (PUT). Until then the row sits in local
-  // state at 0% / inactive so the 100% total stays valid; user can then
-  // adjust percentages and toggle active before clicking Enregistrer.
-  // Pending rows are tagged with `pending-<user_id>` ids so we can
-  // re-merge them on top of refetched server data without losing them.
-  function addCommercial() {
+  // ── Add to LOCAL state only (persistence happens on Save) ─────────
+  function addUser() {
     if (!canEdit || !pickedToAdd) return
     const candidate = available.find(a => a.user_id === pickedToAdd)
     if (!candidate) return
     setEntries((cur) => {
-      // Don't double-add if user clicks twice.
       if (cur.some(e => e.user_id === candidate.user_id)) return cur
       return [
         ...cur,
@@ -107,8 +174,8 @@ export function DistributionManager() {
           percentage:       0,
           active:           false,
           last_assigned_at: null,
-          rdv_count_total:  0,
-          rdv_count_30days: 0,
+          count_total:      0,
+          count_30days:     0,
         },
       ]
     })
@@ -116,10 +183,10 @@ export function DistributionManager() {
     setPickedToAdd('')
   }
 
-  async function removeEntry(e: SaasDistributionEntry) {
+  async function removeEntry(e: GenericEntry) {
     if (!canEdit) return
-    if (!confirm(`Retirer ${e.email ?? 'ce commercial'} de la distribution ?`)) return
-    const res = await fetch(`/api/saas-distribution/${e.user_id}`, { method: 'DELETE' })
+    if (!confirm(`Retirer ${e.email ?? `ce ${roleAdd}`} de la distribution ?`)) return
+    const res = await fetch(`${apiBase}/${e.user_id}`, { method: 'DELETE' })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
       flashToast(j?.error ?? 'Erreur lors de la suppression.')
@@ -138,11 +205,10 @@ export function DistributionManager() {
     >
       <div className="px-6 py-5 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40">
         <h2 className="text-lg font-black uppercase tracking-tighter text-zinc-900 dark:text-white">
-          Distribution des RDV SaaS
+          {title}
         </h2>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-          Configurez la répartition automatique des nouveaux RDV SaaS entre les
-          commerciaux. La somme des pourcentages actifs doit être égale à 100%.
+          {description}
         </p>
       </div>
 
@@ -152,7 +218,6 @@ export function DistributionManager() {
         </div>
       )}
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -160,8 +225,8 @@ export function DistributionManager() {
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Email</th>
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Pourcentage (%)</th>
               <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Actif</th>
-              <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">RDV reçus</th>
-              <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Dernier RDV</th>
+              <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">{countLabel}</th>
+              <th className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">{lastLabel}</th>
               {canEdit && <th className="px-6 py-3 text-right"></th>}
             </tr>
           </thead>
@@ -205,9 +270,9 @@ export function DistributionManager() {
                   </button>
                 </td>
                 <td className="px-6 py-4 text-xs text-zinc-700 dark:text-zinc-300 tabular-nums">
-                  {e.rdv_count_total} <span className="text-zinc-400">total</span>
+                  {e.count_total} <span className="text-zinc-400">total</span>
                   <span className="text-zinc-400"> · </span>
-                  {e.rdv_count_30days} <span className="text-zinc-400">30j</span>
+                  {e.count_30days} <span className="text-zinc-400">30j</span>
                 </td>
                 <td className="px-6 py-4 text-xs text-zinc-500">
                   {e.last_assigned_at
@@ -231,12 +296,11 @@ export function DistributionManager() {
         </table>
         {!loading && entries.length === 0 && !error && (
           <div className="px-6 py-12 text-center text-sm text-zinc-500">
-            Aucun commercial dans la distribution. Ajoutez-en un ci-dessous.
+            Aucun {roleNoun} dans la distribution. Ajoutez-en un ci-dessous.
           </div>
         )}
       </div>
 
-      {/* Totals + add + save */}
       <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           {totalIs100 ? (
@@ -268,14 +332,14 @@ export function DistributionManager() {
                   onChange={(e) => setPickedToAdd(e.target.value)}
                   className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                 >
-                  <option value="">+ Ajouter un commercial…</option>
+                  <option value="">+ Ajouter un {roleAdd}…</option>
                   {available.map(a => (
                     <option key={a.user_id} value={a.user_id}>{a.email ?? a.user_id.slice(0, 8)}</option>
                   ))}
                 </select>
                 <button
                   type="button"
-                  onClick={addCommercial}
+                  onClick={addUser}
                   disabled={!pickedToAdd}
                   className="px-3 py-2 rounded-xl text-sm font-bold bg-zinc-100 dark:bg-zinc-800 text-foreground hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 inline-flex items-center gap-1.5"
                 >

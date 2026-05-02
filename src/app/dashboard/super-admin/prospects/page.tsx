@@ -123,6 +123,9 @@ export default function SuperAdminProspectsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentRole, setCurrentRole]     = useState<AppRole | null>(null)
   const [internalUsers, setInternalUsers] = useState<InternalUser[]>([])
+  // Prospect-distribution preview — loaded once when the create/edit modal
+  // opens so the user can see who 'Automatique' would pick.
+  const [autoPreview, setAutoPreview] = useState<{ user_id: string | null; email: string | null } | null>(null)
 
   const [toast, setToast] = useState<string | null>(null)
   function flashToast(msg: string) {
@@ -283,6 +286,10 @@ export default function SuperAdminProspectsPage() {
     if (!form.phone.trim())         { setError('Téléphone requis.'); return }
     if (!form.showroom_name.trim()) { setError('Nom du showroom requis.'); return }
     setSaving(true)
+    // assigned_to:
+    //   'auto'   → keep the literal string; server picks via distribution
+    //   ''       → null (unassigned)
+    //   <uuid>   → that specific user
     const payload: Record<string, unknown> = {
       full_name:     form.full_name.trim(),
       phone:         form.phone.trim(),
@@ -293,7 +300,9 @@ export default function SuperAdminProspectsPage() {
       notes:         form.notes.trim() || null,
       source:        form.source,
       suivi:         form.suivi,
-      assigned_to:   form.assigned_to || null,
+      assigned_to:   form.assigned_to === 'auto'
+                       ? 'auto'
+                       : (form.assigned_to || null),
     }
     const res = form.id
       ? await fetch(`/api/saas-prospects/${form.id}`, {
@@ -337,8 +346,21 @@ export default function SuperAdminProspectsPage() {
     setForm({
       ...empty,
       // For prospecteur_saas the API forces self-assign anyway; preset for clarity.
-      assigned_to: currentRole === 'prospecteur_saas' ? (currentUserId ?? '') : '',
+      // For super_admin/commercial default to 'auto' (server picks via distribution).
+      assigned_to: currentRole === 'prospecteur_saas'
+        ? (currentUserId ?? '')
+        : 'auto',
     })
+    // Load the auto-distribution preview once. prospecteur_saas doesn't
+    // see the Automatique option so we skip the call for them.
+    if (currentRole !== 'prospecteur_saas') {
+      fetch('/api/saas-prospect-distribution/preview')
+        .then(r => r.ok ? r.json() : null)
+        .then(j => setAutoPreview(j ? { user_id: j.user_id, email: j.email } : null))
+        .catch(() => setAutoPreview(null))
+    } else {
+      setAutoPreview(null)
+    }
   }
 
   function openEdit(p: SaasProspect) {
@@ -719,11 +741,26 @@ export default function SuperAdminProspectsPage() {
                     disabled={currentRole === 'prospecteur_saas'}
                     className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60"
                   >
+                    {/* Automatique sentinel — only offered to super_admin / commercial.
+                        prospecteur_saas can't trigger auto-distribution; the field is
+                        locked to their own user_id below. */}
+                    {currentRole !== 'prospecteur_saas' && (
+                      <option value="auto">⚡ Automatique</option>
+                    )}
                     <option value="">— Aucun —</option>
                     {internalUsers.map(u => (
                       <option key={u.user_id} value={u.user_id}>{u.email ?? u.user_id.slice(0, 8)}</option>
                     ))}
                   </select>
+                  {form.assigned_to === 'auto' && currentRole !== 'prospecteur_saas' && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {autoPreview === null
+                        ? 'Calcul de l’assignation…'
+                        : autoPreview.user_id
+                          ? <>Sera assigné à : <span className="font-bold break-all">{autoPreview.email ?? autoPreview.user_id.slice(0, 8)}</span></>
+                          : 'Aucun prospecteur actif — sera créé sans assignation'}
+                    </p>
+                  )}
                 </div>
               </div>
 
