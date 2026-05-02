@@ -31,6 +31,7 @@ import { format, isToday, isYesterday } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { AddLeadModal } from '@/components/AddLeadModal'
 import { EditLeadModal } from '@/components/EditLeadModal'
+import { ConfirmVenteModal } from '@/components/ConfirmVenteModal'
 
 // ── Map real Lead.status (DB enum) → display label used by the design ──
 type DisplayStatus = 'Chaud' | 'En cours' | 'Nouveau' | 'Froid' | 'Contacté'
@@ -102,6 +103,14 @@ export function ProspectsView() {
   >(null)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [vehiclesById, setVehiclesById] = useState<Record<string, Vehicle>>({})
+  // Vente confirmation handed off from EditLeadModal when a lead is
+  // transitioning to suivi='vendu'. The modal captures the final price
+  // and atomically writes the vente row + flips vehicle status + suivi.
+  const [venteTarget, setVenteTarget] = useState<
+    { lead: Lead; vehicle: Vehicle | null } | null
+  >(null)
+  const [toast, setToast] = useState<string | null>(null)
+  function flashToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500) }
 
   async function fetchLeads() {
     const { data } = await supabase
@@ -234,7 +243,14 @@ export function ProspectsView() {
     const term = search.trim().toLowerCase()
     return leads
       .filter((l) => {
-        if (suiviFilter !== 'all' && l.suivi !== suiviFilter) return false
+        // Vendu leads belong on the Ventes page — hide them from the
+        // Prospects list by default. Admins / managers can still find them
+        // by explicitly picking "Vendu" in the filter dropdown.
+        if (suiviFilter === 'all') {
+          if (l.suivi === 'vendu') return false
+        } else if (l.suivi !== suiviFilter) {
+          return false
+        }
         if (!term) return true
         return (
           l.full_name.toLowerCase().includes(term) ||
@@ -664,8 +680,33 @@ export function ProspectsView() {
       <EditLeadModal
         lead={editingLead}
         onClose={() => setEditingLead(null)}
-        onSaved={() => { fetchLeads(); fetchVehicles() }}
+        onSaved={(info) => {
+          fetchLeads(); fetchVehicles()
+          if (info?.askVenteFor) {
+            setVenteTarget(info.askVenteFor)
+          }
+        }}
       />
+
+      {venteTarget && (
+        <ConfirmVenteModal
+          open={true}
+          lead={venteTarget.lead}
+          vehicle={venteTarget.vehicle}
+          onClose={() => setVenteTarget(null)}
+          onConfirmed={({ prix_vente }) => {
+            const fmt = new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 0 }).format(prix_vente)
+            flashToast(`Vente enregistrée — ${fmt} DA`)
+            fetchLeads(); fetchVehicles()
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[60] px-4 py-2.5 rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 text-sm font-medium">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

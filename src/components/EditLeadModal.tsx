@@ -65,7 +65,14 @@ export function EditLeadModal({
 }: {
   lead: Lead | null
   onClose: () => void
-  onSaved: () => void
+  /**
+   * Called after a successful save. When the user transitioned the lead's
+   * suivi to 'vendu' for the first time, the optional `askVenteFor` hint
+   * tells the parent to open the ConfirmVenteModal so the final price
+   * (and notes) can be captured. The modal itself performs the vente
+   * insert + vehicle status flip + suivi update.
+   */
+  onSaved: (info?: { askVenteFor?: { lead: Lead; vehicle: Vehicle | null } }) => void
 }) {
   const [form, setForm] = useState<EditForm | null>(null)
   const [saving, setSaving] = useState(false)
@@ -178,13 +185,24 @@ export function EditLeadModal({
     const linkedVehicleId = needsVehicle ? form.vehicle_id : null
     const rdvIso = isRdv ? localInputToIso(form.rdv_date) : null
 
+    // When the user is transitioning the lead to 'vendu' for the first
+    // time, defer the suivi flip + vehicle status cascade + vente row to
+    // the ConfirmVenteModal (which captures the final sale price). We
+    // still persist the rest of the form fields here so the user's edits
+    // (phone, notes, etc.) aren't lost while the vente popup is open.
+    const transitioningToVendu = isVendu && (lead.suivi ?? null) !== 'vendu'
+
     const payload: Record<string, unknown> = {
       full_name:  form.full_name.trim(),
       phone:      form.phone.trim() || null,
       email:      form.email.trim() || null,
       wilaya:     form.wilaya || null,
       source:     form.source,
-      suivi:      form.suivi || null,
+      // Defer setting suivi='vendu' to the ConfirmVenteModal — it does it
+      // atomically with the ventes insert + vehicle.status='sold'. Until
+      // then, keep the previous suivi value to avoid showing the lead as
+      // sold without a corresponding vente row.
+      suivi:      transitioningToVendu ? (lead.suivi ?? null) : (form.suivi || null),
       notes:      form.notes.trim() || null,
       vehicle_id: linkedVehicleId,
       rdv_date:   rdvIso,
@@ -251,7 +269,9 @@ export function EditLeadModal({
     }
 
     // Apply the new status: rdv_planifie → reserved, vendu → sold.
-    if (linkedVehicleId) {
+    // Skip the vendu cascade when we're deferring to the ConfirmVenteModal
+    // (it sets vehicle.status='sold' itself once the user confirms the price).
+    if (linkedVehicleId && !transitioningToVendu) {
       const nextStatus: 'reserved' | 'sold' | null =
         isVendu ? 'sold' : isRdv ? 'reserved' : null
       if (nextStatus) {
@@ -285,7 +305,9 @@ export function EditLeadModal({
               body:        `${lead.full_name} · ${label}${when ? ` · ${when}` : ''}`,
               done:        false,
             }])
-          } else if (isVendu) {
+          } else if (isVendu && !transitioningToVendu) {
+            // The "Vente conclue" activity is logged by the ConfirmVenteModal
+            // path when transitioning, to avoid duplicate audit entries.
             await supabase.from('activities').insert([{
               showroom_id: lead.showroom_id,
               lead_id:     lead.id,
@@ -300,7 +322,14 @@ export function EditLeadModal({
     }
 
     setSaving(false)
-    onSaved()
+
+    // Hand off to the ConfirmVenteModal when we deferred the vendu transition.
+    if (transitioningToVendu && linkedVehicleId) {
+      const linked = vehicles.find((v) => v.id === linkedVehicleId) ?? null
+      onSaved({ askVenteFor: { lead, vehicle: linked } })
+    } else {
+      onSaved()
+    }
     onClose()
   }
 

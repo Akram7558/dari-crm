@@ -145,7 +145,10 @@ export const LEAD_SUIVI_BADGE_CLASSES: Record<LeadSuivi, string> = {
   tentative_3:  'bg-red-600 text-white border-red-700 dark:bg-red-600 dark:text-white dark:border-red-700',
   reporter:     'bg-orange-700 text-white border-orange-800 dark:bg-orange-700 dark:text-white dark:border-orange-800',
   rdv_planifie: 'bg-emerald-600 text-white border-emerald-700 dark:bg-emerald-600 dark:text-white dark:border-emerald-700',
-  vendu:        'bg-rose-600 text-white border-rose-700 dark:bg-rose-600 dark:text-white dark:border-rose-700',
+  // Emerald to match the "Vendu" status color used on /dashboard/rendez-vous
+  // (RDV row Statut dropdown). Was rose, but the showroom-side suivi badge
+  // should reflect the same colour as a closed sale elsewhere in the app.
+  vendu:        'bg-emerald-600 text-white border-emerald-700 dark:bg-emerald-600 dark:text-white dark:border-emerald-700',
   perdu:        'bg-slate-500 text-white border-slate-600 dark:bg-slate-600 dark:text-white dark:border-slate-700',
 }
 

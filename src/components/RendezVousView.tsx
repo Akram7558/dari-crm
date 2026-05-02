@@ -13,6 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { getCurrentShowroomId } from '@/lib/auth'
+import { ConfirmVenteModal } from '@/components/ConfirmVenteModal'
 import type { Lead, Vehicle } from '@/lib/types'
 import { format, isPast, isToday } from 'date-fns'
 import { fr } from 'date-fns/locale'
@@ -89,6 +90,13 @@ export function RendezVousView() {
   const [statutByLead, setStatutByLead] = useState<Record<string, RdvAction>>({})
   // Pending deposit modal state — shown when user picks "Réservé".
   const [depositModal, setDepositModal] = useState<{ lead: Lead; amount: string } | null>(null)
+  // Vente confirmation modal — opened when the row Statut dropdown picks "Vendu".
+  const [venteTarget, setVenteTarget] = useState<
+    { lead: Lead; vehicle: Vehicle | null; vehicleName: string } | null
+  >(null)
+  // Toast for "Vente enregistrée — X DA" / sale-related notifications.
+  const [toast, setToast] = useState<string | null>(null)
+  function flashToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500) }
 
   async function fetchAll() {
     const { data, error } = await supabase
@@ -163,50 +171,28 @@ export function RendezVousView() {
     }
 
     if (action === 'vendu') {
-      if (!confirm(`Confirmer la vente de ${vehicleName} à ${lead.full_name} ?`)) return
-      // 1. Mark vehicle as sold.
-      if (v) {
-        await supabase
-          .from('vehicles')
-          .update({ status: 'sold', reserved_by_lead_id: lead.id })
-          .eq('id', v.id)
-      }
-      // 2. Update lead suivi to vendu (so it leaves the RDV page).
-      const { error: lErr } = await supabase
-        .from('leads')
-        .update({ suivi: 'vendu' })
-        .eq('id', lead.id)
-      if (lErr) { alert(lErr.message); return }
-      // 3. Insert into ventes ledger.
-      const showroomId = await getCurrentShowroomId()
-      const { error: vErr } = await supabase.from('ventes').insert([{
-        showroom_id:       showroomId,
-        lead_id:           lead.id,
-        vehicle_id:        v?.id ?? null,
-        client_name:       lead.full_name,
-        vehicle_name:      vehicleName,
-        vehicle_reference: v?.reference ?? null,
-        prix_vente:        v?.price_dzd ?? null,
-      }])
-      if (vErr) {
-        if (/ventes/i.test(vErr.message)) {
-          alert("La table 'ventes' n'existe pas. Exécutez supabase/migration_10_ventes.sql.")
-        } else {
-          alert(vErr.message)
-        }
-      }
-      // 4. Audit trail.
-      await supabase.from('activities').insert([{
-        showroom_id: showroomId,
-        lead_id:     lead.id,
-        type:        'status_change',
-        title:       `Vente conclue : ${vehicleName}`,
-        body:        `${lead.full_name} · ${vehicleName}`,
-        done:        true,
-      }])
-      fetchAll()
+      // Hand off to the ConfirmVenteModal: it captures the FINAL sale
+      // price (pre-filled with the vehicle's listed price but editable)
+      // and atomically performs the vente insert + vehicle status flip
+      // + lead suivi update. The dropdown stays on its previous value
+      // until the modal completes.
+      setVenteTarget({ lead, vehicle: v ?? null, vehicleName })
       return
     }
+  }
+
+  // Audit trail for completed ventes — fired after the modal confirms.
+  async function logVenteActivity(args: { lead: Lead; vehicleName: string }) {
+    const showroomId = await getCurrentShowroomId()
+    if (!showroomId) return
+    await supabase.from('activities').insert([{
+      showroom_id: showroomId,
+      lead_id:     args.lead.id,
+      type:        'status_change',
+      title:       `Vente conclue : ${args.vehicleName}`,
+      body:        `${args.lead.full_name} · ${args.vehicleName}`,
+      done:        true,
+    }])
   }
 
   const rows = useMemo(() => {
@@ -549,6 +535,30 @@ export function RendezVousView() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Vente confirmation — opened by the row "Vendu" action */}
+      {venteTarget && (
+        <ConfirmVenteModal
+          open={true}
+          lead={venteTarget.lead}
+          vehicle={venteTarget.vehicle}
+          onClose={() => setVenteTarget(null)}
+          onConfirmed={({ prix_vente }) => {
+            const fmt = new Intl.NumberFormat('fr-DZ', { maximumFractionDigits: 0 }).format(prix_vente)
+            flashToast(`Vente enregistrée — ${fmt} DA`)
+            // Audit trail (best-effort, fire-and-forget).
+            void logVenteActivity({ lead: venteTarget.lead, vehicleName: venteTarget.vehicleName })
+            fetchAll()
+          }}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[60] px-4 py-2.5 rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 text-sm font-medium">
+          {toast}
         </div>
       )}
     </div>
