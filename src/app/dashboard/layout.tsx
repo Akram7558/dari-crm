@@ -110,6 +110,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const activeNavItems = navItemsForRole(userRole)
 
+  // Internal-team roles (super_admin, commercial, prospecteur_saas) have
+  // their own Paramètres / Intégrations entries inside `activeNavItems`,
+  // so hiding the showroom-side footer links keeps the sidebar from
+  // showing duplicate "Paramètres" / "Intégrations" buttons for them.
+  const isInternalTeam =
+    userRole === 'super_admin' ||
+    userRole === 'commercial'  ||
+    userRole === 'prospecteur_saas'
+
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setMobileOpen(false)
@@ -201,32 +210,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Footer */}
       <div className="px-4 py-6 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
-        <Link
-          href="/dashboard/parametres"
-          onClick={() => setMobileOpen(false)}
-          className={cn(
-            'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-            pathname === '/dashboard/parametres'
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-          )}
-        >
-          <Settings className="w-4 h-4" />
-          Paramètres
-        </Link>
-        <Link
-          href="/dashboard/settings/integrations"
-          onClick={() => setMobileOpen(false)}
-          className={cn(
-            'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
-            pathname.startsWith('/dashboard/settings/integrations')
-              ? 'text-indigo-600 dark:text-indigo-400'
-              : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
-          )}
-        >
-          <Plug className="w-4 h-4" />
-          Intégrations
-        </Link>
+        {/* Showroom-side links — hidden for internal team since their own
+            Paramètres / Intégrations entries live in the main nav. */}
+        {!isInternalTeam && (
+          <>
+            <Link
+              href="/dashboard/parametres"
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                pathname === '/dashboard/parametres'
+                  ? 'text-indigo-600 dark:text-indigo-400'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              )}
+            >
+              <Settings className="w-4 h-4" />
+              Paramètres
+            </Link>
+            <Link
+              href="/dashboard/settings/integrations"
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                pathname.startsWith('/dashboard/settings/integrations')
+                  ? 'text-indigo-600 dark:text-indigo-400'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              )}
+            >
+              <Plug className="w-4 h-4" />
+              Intégrations
+            </Link>
+          </>
+        )}
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all"
