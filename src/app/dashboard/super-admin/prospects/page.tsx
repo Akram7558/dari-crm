@@ -18,6 +18,8 @@ import {
   type AppRole,
 } from '@/lib/types'
 import { CancelProspectModal } from '@/components/saas/CancelProspectModal'
+import { ScheduleRdvModal } from '@/components/saas/ScheduleRdvModal'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 
@@ -129,6 +131,13 @@ export default function SuperAdminProspectsPage() {
 
   // Cancellation modal — opened when the inline suivi dropdown picks 'annule'.
   const [cancelTarget, setCancelTarget] = useState<SaasProspect | null>(null)
+  // Schedule RDV modal — opened when the inline suivi dropdown picks 'rdv_planifie'.
+  const [scheduleTarget, setScheduleTarget] = useState<SaasProspect | null>(null)
+  // Confirmation dialog for non-destructive transitions.
+  const [confirmState, setConfirmState] = useState<
+    | null
+    | { prospect: SaasProspect; next: SaasSuivi; loading: boolean }
+  >(null)
 
   // ── Load me + role + internal users (for assignee picker) ──────────
   useEffect(() => {
@@ -214,40 +223,53 @@ export default function SuperAdminProspectsPage() {
   }, [internalUsers])
 
   // ── Inline suivi update from the table dropdown ────────────────────
-  // For non-annule transitions we PATCH optimistically. For 'annule' we
-  // open the cancellation modal (which does its own PATCH with the
-  // mandatory reason) — never send a half-baked annule update from here.
-  async function updateSuiviInline(p: SaasProspect, next: SaasSuivi) {
+  // Branches by target:
+  //   annule       → CancelProspectModal (mandatory reason)
+  //   rdv_planifie → ScheduleRdvModal (date/time/auto-assign)
+  //   anything else → ConfirmDialog → PATCH suivi
+  function onSuiviPicked(p: SaasProspect, next: SaasSuivi) {
     if (next === p.suivi) return
     if (next === 'annule') {
       setCancelTarget(p)
       return
     }
-    // Optimistic update.
-    const prevSuivi = p.suivi
-    setProspects((cur) => cur.map((row) => row.id === p.id ? { ...row, suivi: next } : row))
-    if (detail?.id === p.id) setDetail((d) => d ? { ...d, suivi: next } : d)
+    if (next === 'rdv_planifie') {
+      if (currentRole === 'prospecteur_saas') {
+        flashToast("Vous n'avez pas la permission de créer un RDV.")
+        return
+      }
+      setScheduleTarget(p)
+      return
+    }
+    // Non-destructive transitions: confirm then PATCH.
+    setConfirmState({ prospect: p, next, loading: false })
+  }
 
+  async function commitSuiviChange() {
+    if (!confirmState) return
+    const { prospect: p, next } = confirmState
+    setConfirmState({ ...confirmState, loading: true })
     const res = await fetch(`/api/saas-prospects/${p.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ suivi: next }),
     })
     const json = await res.json().catch(() => ({}))
+    setConfirmState(null)
     if (!res.ok) {
-      // Revert on error.
-      setProspects((cur) => cur.map((row) => row.id === p.id ? { ...row, suivi: prevSuivi } : row))
-      if (detail?.id === p.id) setDetail((d) => d ? { ...d, suivi: prevSuivi } : d)
       const msg = res.status === 403
         ? "Vous n'avez pas accès à ce prospect."
         : (json?.error ?? 'Erreur lors de la mise à jour.')
       flashToast(msg)
       return
     }
-    // Replace with the server-canonical row (in case triggers added fields).
     if (json.prospect) {
       setProspects((cur) => cur.map((row) => row.id === p.id ? json.prospect : row))
       if (detail?.id === p.id) setDetail(json.prospect)
+    } else {
+      // Fallback — patch local state with the new suivi.
+      setProspects((cur) => cur.map((row) => row.id === p.id ? { ...row, suivi: next } : row))
+      if (detail?.id === p.id) setDetail((d) => d ? { ...d, suivi: next } : d)
     }
     flashToast('Suivi mis à jour')
   }
@@ -483,7 +505,7 @@ export default function SuperAdminProspectsPage() {
                         <div className="relative inline-block">
                           <select
                             value={p.suivi}
-                            onChange={(e) => updateSuiviInline(p, e.target.value as SaasSuivi)}
+                            onChange={(e) => onSuiviPicked(p, e.target.value as SaasSuivi)}
                             className={cn(
                               'appearance-none cursor-pointer pl-3 pr-7 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border focus:outline-none focus:ring-2 focus:ring-indigo-500/30',
                               SAAS_SUIVI_BADGE[p.suivi],
@@ -891,6 +913,42 @@ export default function SuperAdminProspectsPage() {
             if (detail?.id === updated.id) setDetail(updated)
             flashToast('Prospect annulé')
           }}
+        />
+      )}
+
+      {/* ── Schedule RDV modal (triggered by inline dropdown picking rdv_planifie) ─ */}
+      {scheduleTarget && (
+        <ScheduleRdvModal
+          open={true}
+          prospect={scheduleTarget}
+          onClose={() => setScheduleTarget(null)}
+          onScheduled={(_rdv, assigned) => {
+            // Mark the prospect locally as rdv_planifie (server already did it).
+            const targetId = scheduleTarget.id
+            setProspects((cur) => cur.map((row) =>
+              row.id === targetId ? { ...row, suivi: 'rdv_planifie' as SaasSuivi } : row,
+            ))
+            if (detail?.id === targetId) {
+              setDetail((d) => d ? { ...d, suivi: 'rdv_planifie' as SaasSuivi } : d)
+            }
+            flashToast(
+              assigned?.email
+                ? `RDV planifié et assigné à ${assigned.email}`
+                : 'RDV créé sans assignation',
+            )
+          }}
+        />
+      )}
+
+      {/* ── Confirmation dialog for non-destructive suivi changes ─ */}
+      {confirmState && (
+        <ConfirmDialog
+          open={true}
+          title="Confirmer le changement"
+          message={`Confirmer le passage à « ${SAAS_SUIVI_LABELS[confirmState.next]} » ?`}
+          loading={confirmState.loading}
+          onCancel={() => setConfirmState(null)}
+          onConfirm={commitSuiviChange}
         />
       )}
 

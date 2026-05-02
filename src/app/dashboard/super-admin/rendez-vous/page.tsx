@@ -8,9 +8,12 @@ import {
 import { supabase } from '@/lib/supabase'
 import {
   type SaasRdv, type SaasRdvStatus, type SaasProspect,
+  type SaasDistributionPreview,
   SAAS_RDV_STATUS_VALUES, SAAS_RDV_STATUS_LABELS, SAAS_RDV_STATUS_BADGE,
   type AppRole,
 } from '@/lib/types'
+import { Sparkles, AlertTriangle } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 
@@ -27,6 +30,8 @@ type RdvForm = {
   scheduled_at: string
   status: SaasRdvStatus
   notes: string
+  auto_distribute: boolean      // create-only; ignored on edit
+  assigned_to: string           // create-only; used when auto_distribute=false
 }
 
 const empty: RdvForm = {
@@ -35,7 +40,11 @@ const empty: RdvForm = {
   scheduled_at: '',
   status: 'planifie',
   notes: '',
+  auto_distribute: true,
+  assigned_to: '',
 }
+
+type InternalUser = { user_id: string; email: string | null }
 
 function isoToLocalInput(iso: string | null): string {
   if (!iso) return ''
@@ -65,6 +74,11 @@ export default function SuperAdminRendezVousSaasPage() {
   // Prospect picker for the create modal — pulled from /api/saas-prospects.
   const [prospectQuery, setProspectQuery] = useState('')
   const [prospectOptions, setProspectOptions] = useState<SaasProspect[]>([])
+
+  // Auto-distribution preview + manual-assignee list for the create modal.
+  const [preview, setPreview] = useState<SaasDistributionPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [internalUsers, setInternalUsers] = useState<InternalUser[]>([])
 
   const [currentRole, setCurrentRole] = useState<AppRole | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -121,6 +135,29 @@ export default function SuperAdminRendezVousSaasPage() {
     return () => clearTimeout(t)
   }, [prospectQuery, form])
 
+  // ── Load distribution preview + internal-user list when creating ─
+  // We refresh the preview each time the create modal opens so it
+  // reflects the latest distribution config.
+  useEffect(() => {
+    if (!form || form.id) return
+    setPreviewLoading(true)
+    fetch('/api/saas-distribution/preview')
+      .then(r => r.json())
+      .then(j => setPreview(j as SaasDistributionPreview))
+      .catch(() => setPreview({ user_id: null, email: null, percentage: null }))
+      .finally(() => setPreviewLoading(false))
+
+    // Internal users for the manual assignee dropdown — best-effort.
+    fetch('/api/admin/list-internal-users')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!j) return
+        setInternalUsers((j.users ?? []) as InternalUser[])
+      })
+      .catch(() => setInternalUsers([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form?.id])
+
   const canDelete = currentRole === 'super_admin'
 
   async function submit(e: React.FormEvent) {
@@ -129,30 +166,71 @@ export default function SuperAdminRendezVousSaasPage() {
     setError('')
     if (!form.prospect_id)  { setError('Sélectionnez un prospect.'); return }
     if (!form.scheduled_at) { setError('Date et heure requises.'); return }
-    setSaving(true)
-    const payload = {
-      prospect_id:  form.prospect_id,
-      scheduled_at: new Date(form.scheduled_at).toISOString(),
-      status:       form.status,
-      notes:        form.notes.trim() || null,
+
+    // ── Edit ─────────────────────────────────────────────────────
+    if (form.id) {
+      setSaving(true)
+      const res = await fetch(`/api/saas-rdv/${form.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospect_id:  form.prospect_id,
+          scheduled_at: new Date(form.scheduled_at).toISOString(),
+          status:       form.status,
+          notes:        form.notes.trim() || null,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      setSaving(false)
+      if (!res.ok) { setError(json?.error ?? 'Erreur lors de la sauvegarde.'); return }
+      setForm(null); flashToast('RDV mis à jour'); fetchRdv()
+      return
     }
-    const res = form.id
-      ? await fetch(`/api/saas-rdv/${form.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-      : await fetch('/api/saas-rdv', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
+
+    // ── Create ──────────────────────────────────────────────────
+    setSaving(true)
+    if (form.auto_distribute) {
+      // Goes through the schedule-rdv flow which also flips the prospect's
+      // suivi to rdv_planifie atomically.
+      const res = await fetch(`/api/saas-prospects/${form.prospect_id}/schedule-rdv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduled_at: new Date(form.scheduled_at).toISOString(),
+          notes:        form.notes.trim() || null,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      setSaving(false)
+      if (!res.ok) { setError(json?.error ?? 'Erreur lors de la planification.'); return }
+      setForm(null)
+      const assignedEmail = json?.assigned?.email ?? preview?.email ?? null
+      flashToast(assignedEmail
+        ? `RDV planifié et assigné à ${assignedEmail}`
+        : 'RDV créé sans assignation')
+      fetchRdv()
+      return
+    }
+
+    // Manual assignment — direct insert. Doesn't touch prospect.suivi.
+    if (!form.assigned_to) {
+      setSaving(false); setError('Sélectionnez un commercial.'); return
+    }
+    const res = await fetch('/api/saas-rdv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prospect_id:  form.prospect_id,
+        scheduled_at: new Date(form.scheduled_at).toISOString(),
+        status:       form.status,
+        notes:        form.notes.trim() || null,
+        assigned_to:  form.assigned_to,
+      }),
+    })
     const json = await res.json().catch(() => ({}))
     setSaving(false)
     if (!res.ok) { setError(json?.error ?? 'Erreur lors de la sauvegarde.'); return }
-    setForm(null)
-    flashToast(form.id ? 'RDV mis à jour' : 'RDV planifié')
-    fetchRdv()
+    setForm(null); flashToast('RDV planifié'); fetchRdv()
   }
 
   async function remove(r: RdvWithProspect) {
@@ -177,11 +255,13 @@ export default function SuperAdminRendezVousSaasPage() {
   function openEdit(r: RdvWithProspect) {
     setError('')
     setForm({
-      id:           r.id,
-      prospect_id:  r.prospect_id,
-      scheduled_at: isoToLocalInput(r.scheduled_at),
-      status:       r.status,
-      notes:        r.notes ?? '',
+      id:              r.id,
+      prospect_id:     r.prospect_id,
+      scheduled_at:    isoToLocalInput(r.scheduled_at),
+      status:          r.status,
+      notes:           r.notes ?? '',
+      auto_distribute: false,                    // ignored on edit
+      assigned_to:     r.assigned_to ?? '',
     })
   }
 
@@ -465,6 +545,79 @@ export default function SuperAdminRendezVousSaasPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Auto-distribution toggle (create-only) */}
+              {!form.id && (
+                <>
+                  <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5 cursor-pointer">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-foreground">Distribution automatique</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        Assigne le RDV au commercial le plus en déficit.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={form.auto_distribute}
+                      onClick={() => setForm({ ...form, auto_distribute: !form.auto_distribute })}
+                      className={cn(
+                        'relative w-10 h-5 rounded-full transition-colors',
+                        form.auto_distribute ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                          form.auto_distribute && 'translate-x-5',
+                        )}
+                      />
+                    </button>
+                  </label>
+
+                  {form.auto_distribute ? (
+                    previewLoading ? (
+                      <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                        Calcul de l&apos;assignation…
+                      </div>
+                    ) : preview?.user_id ? (
+                      <div className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/10 px-3 py-2.5 flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-300 mt-0.5 shrink-0" />
+                        <p className="text-xs text-blue-900 dark:text-blue-200">
+                          Sera assigné à : <span className="font-bold break-all">{preview.email ?? '—'}</span>
+                          {preview.percentage != null && (
+                            <span className="text-blue-700 dark:text-blue-300"> ({preview.percentage}%)</span>
+                          )}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10 px-3 py-2.5 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-300 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-900 dark:text-amber-200">
+                          Aucun commercial actif. Configurez la distribution dans <span className="font-bold">Paramètres</span>.
+                        </p>
+                      </div>
+                    )
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">Assigné à *</label>
+                      <select
+                        value={form.assigned_to}
+                        onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+                        required
+                        className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                      >
+                        <option value="">— Sélectionner —</option>
+                        {internalUsers
+                          .filter(u => u.user_id)
+                          .map(u => (
+                            <option key={u.user_id} value={u.user_id}>{u.email ?? u.user_id.slice(0, 8)}</option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-foreground mb-1">Notes</label>

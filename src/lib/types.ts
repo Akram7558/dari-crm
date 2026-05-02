@@ -300,6 +300,24 @@ export type SaasRdv = {
   updated_at: string
 }
 
+// ── SaaS RDV distribution (migration_18) ────────────────────────────
+export type SaasDistributionEntry = {
+  id: string
+  user_id: string
+  email: string | null            // resolved from auth.users
+  percentage: number              // 0..100
+  active: boolean
+  last_assigned_at: string | null
+  rdv_count_total: number
+  rdv_count_30days: number
+}
+
+export type SaasDistributionPreview = {
+  user_id:    string | null
+  email:      string | null
+  percentage: number | null
+}
+
 export type SaasActivity = {
   id: string
   prospect_id: string | null
